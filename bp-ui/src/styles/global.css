@@ -241,3 +241,52 @@ select.control:disabled {
   padding: 12px;
   color: rgba(255,255,255,0.65);
 }
+
+
+
+
+.previewCard {
+  margin-top: 20px;
+  padding: 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(255,255,255,0.12);
+  background:
+    radial-gradient(260px 120px at 10% 10%, rgba(216,179,90,0.08), transparent 60%),
+    linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.03));
+  backdrop-filter: blur(12px);
+}
+
+.previewTitle {
+  font-size: 14px;
+  margin-bottom: 10px;
+}
+
+.previewRow {
+  margin-bottom: 6px;
+}
+
+.previewStep {
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: rgba(255,255,255,0.04);
+  margin-bottom: 6px;
+}
+
+
+.previewFlow {
+  margin: 6px 0;
+  font-weight: 500;
+  letter-spacing: 0.03em;
+}
+
+.arrow {
+  margin: 0 8px;
+  color: rgba(216,179,90,0.8);
+}
+
+.previewStepTitle {
+  font-size: 13px;
+  text-transform: uppercase;
+  opacity: 0.7;
+}
+

@@ -165,6 +165,10 @@ export async function getAcrossDestinations(
 }
 
 
+export async function getAcrossRoutesRaw(env: Env): Promise<AcrossRoute[]> {
+  return fetchRoutes(env);
+}
+
 /* ===========================
    Debug helper
 =========================== */
