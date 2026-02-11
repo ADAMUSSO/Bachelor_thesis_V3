@@ -1,0 +1,137 @@
+.msApp {
+  min-height: 100vh;
+}
+
+.msMain {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 28px 18px 60px;
+}
+
+.centerStage {
+  min-height: calc(100vh - 72px);
+  display: grid;
+  place-items: center;
+}
+
+.panel {
+  width: min(720px, 100%);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow);
+  padding: 18px;
+  position: relative;
+  overflow: visible;
+}
+
+.panel::before {
+  content: "";
+  position: absolute;
+  inset: 0;                /* NIE -2px */
+  border-radius: var(--r-lg);  /* rovnaký radius ako panel */
+  background:
+    radial-gradient(420px 240px at 12% 10%, rgba(216, 179, 90, 0.12), transparent 60%),
+    radial-gradient(420px 240px at 88% 12%, rgba(75, 123, 255, 0.14), transparent 58%);
+  pointer-events: none;
+}
+
+.panel__header {
+  position: relative;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.panel__title {
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
+.panel__hint {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.form {
+  position: relative;
+  display: grid;
+  gap: 14px;
+}
+
+.row2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+@media (max-width: 640px) {
+  .row2 { grid-template-columns: 1fr; }
+}
+
+.actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 6px;
+}
+.submitBtn {
+  width: 100%;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 14px;
+  padding: 14px 16px;
+  cursor: pointer;
+  letter-spacing: 0.04em;
+  transition: all 0.25s ease;
+}
+
+.submitBtn:hover {
+  border-color: rgba(216, 179, 90, 0.65);
+  background: rgba(216, 179, 90, 0.18);
+  box-shadow: 0 0 0 4px rgba(216, 179, 90, 0.10);
+}
+
+.submitBtn:active {
+  transform: translateY(1px);
+}
+
+
+/* --- Network Switch --- */
+
+.networkSwitch {
+  display: flex;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  border-radius: 999px;
+  padding: 4px;
+}
+
+.networkBtn {
+  border: none;
+  background: transparent;
+  padding: 6px 12px;
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  transition: all 0.2s ease;
+}
+
+.networkBtn.active {
+  background: rgba(216, 179, 90, 0.18);
+  color: white;
+}
+
+.networkBtn:hover {
+  color: white;
+}
+
+.submitBtn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}

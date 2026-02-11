@@ -1,0 +1,81 @@
+.msHeader {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+
+  background: rgba(10, 18, 45, 0.42);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.msHeader__inner {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 18px 18px;
+
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.msBrand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.msBrand__mark {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, rgba(216, 179, 90, 0.95), rgba(75, 123, 255, 0.85));
+}
+
+.msBrand__name {
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+/* --- Navigation --- */
+
+.msNav {
+  display: flex;
+  align-items: center;
+  gap: 34px;   /* viac od seba */
+}
+
+.msNav__link {
+  position: relative;
+  background: none;
+  border: none;
+  padding: 4px 0;
+  cursor: pointer;
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 14px;
+  letter-spacing: 0.04em;
+}
+
+.msNav__link::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: -6px;
+  width: 0%;
+  height: 2px;
+  background: var(--gold);
+  transition: width 0.25s ease;
+}
+
+.msNav__link:hover::after {
+  width: 100%;
+}
+
+.msNav__link--active {
+  color: white;
+}
+
+.msNav__link--active::after {
+  width: 100%;
+}

@@ -1,0 +1,7 @@
+.env
+/src/shared/env.ts
+node_modules
+dist
+.env
+.env.local
+.DS_Store

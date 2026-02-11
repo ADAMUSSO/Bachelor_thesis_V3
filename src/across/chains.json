@@ -1,0 +1,37 @@
+{
+  "mainnet": [
+    { "name": "Arbitrum", "chainId": 42161 },
+    { "name": "Base", "chainId": 8453 },
+    { "name": "Blast", "chainId": 81457 },
+    { "name": "BNB Smart Chain", "chainId": 56 },
+    { "name": "Ethereum", "chainId": 1 },
+    { "name": "HyperEVM", "chainId": 999 },
+    { "name": "Ink", "chainId": 57073 },
+    { "name": "Lens", "chainId": 232 },
+    { "name": "Linea", "chainId": 59144 },
+    { "name": "Lisk", "chainId": 1135 },
+    { "name": "MegaETH", "chainId": 4326 },
+    { "name": "Mode", "chainId": 34443 },
+    { "name": "Monad", "chainId": 143 },
+    { "name": "Optimism", "chainId": 10 },
+    { "name": "Plasma", "chainId": 9745 },
+    { "name": "Polygon", "chainId": 137 },
+    { "name": "Scroll", "chainId": 534352 },
+    { "name": "Soneium", "chainId": 1868 },
+    { "name": "Solana", "chainId": 34268394551451 },
+    { "name": "Unichain", "chainId": 130 },
+    { "name": "World Chain", "chainId": 480 },
+    { "name": "zkSync", "chainId": 324 },
+    { "name": "Zora", "chainId": 7777777 }
+  ],
+  "testnet": [
+    { "name": "Arbitrum Sepolia", "chainId": 421614 },
+    { "name": "Base Sepolia", "chainId": 84532 },
+    { "name": "Blast Sepolia", "chainId": 168587773 },
+    { "name": "Ethereum Sepolia", "chainId": 11155111 },
+    { "name": "Lisk Sepolia", "chainId": 4202 },
+    { "name": "Mode Testnet", "chainId": 919 },
+    { "name": "Optimism Sepolia", "chainId": 11155420 },
+    { "name": "Polygon Amoy", "chainId": 80002 }
+  ]
+}
