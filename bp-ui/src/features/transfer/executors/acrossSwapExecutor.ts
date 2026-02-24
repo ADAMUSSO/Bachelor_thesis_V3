@@ -4,6 +4,16 @@ import { fetchSwapApproval } from "../../../services/acrossSwapApproval";
 import type { AcrossRoute, Env, Token } from "../../../catalog/types";
 import { getRpcUrl } from "../../../evm/rpcs";
 
+
+
+function optPositiveBigInt(v: unknown): bigint | undefined {
+  if (v === null || v === undefined) return undefined;
+  const s = String(v).trim();
+  if (s === "" || s === "0") return undefined;
+  const b = BigInt(s);
+  return b > 0n ? b : undefined;
+}
+
 function findRoute(
   routes: AcrossRoute[],
   originChainId: number,
@@ -105,7 +115,7 @@ export async function executeAcrossViaSwapApi(args: {
       to: approvalTx.to,
       data: approvalTx.data,
       value: approvalTx.value ? BigInt(approvalTx.value) : 0n,
-      gas: approvalTx.gas ? BigInt(approvalTx.gas) : undefined,
+      gas: optPositiveBigInt(approvalTx.gas),
       maxFeePerGas: approvalTx.maxFeePerGas ? BigInt(approvalTx.maxFeePerGas) : undefined,
       maxPriorityFeePerGas: approvalTx.maxPriorityFeePerGas
         ? BigInt(approvalTx.maxPriorityFeePerGas)
@@ -127,7 +137,7 @@ export async function executeAcrossViaSwapApi(args: {
       : args.tokenKey === "native"
       ? BigInt(amountRaw)
       : 0n,
-    gas: swapTx.gas ? BigInt(swapTx.gas) : undefined,
+    gas: optPositiveBigInt(swapTx.gas),
     maxFeePerGas: swapTx.maxFeePerGas ? BigInt(swapTx.maxFeePerGas) : undefined,
     maxPriorityFeePerGas: swapTx.maxPriorityFeePerGas
       ? BigInt(swapTx.maxPriorityFeePerGas)
