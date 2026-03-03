@@ -1,45 +1,106 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { isAddress as isSubstrateAddress } from "@polkadot/util-crypto";
 import {
   getAcrossChains,
   getAcrossDestinations,
-  getAcrossTokensForChain,
   getAcrossRoutesRaw,
+  getAcrossTokensForChain,
 } from "../catalog/acrossCatalog";
-import type { Env, Chain, Token } from "../catalog/types";
+import {
+  getSnowbridgeDestinations,
+  isPaseoAssetHubDestination,
+  PASEO_ASSETHUB_CHAIN,
+} from "../catalog/snowbridgeCatalog";
+import type { Chain, Env, Token } from "../catalog/types";
 import ComboBox, { type ComboOption } from "../components/ComboBox";
-import { buildTransferPlan } from "../features/transfer/planner";
-import type { TransferPlan, TransferIntent } from "../features/transfer/types";
 import { executeAcrossViaSwapApi } from "../features/transfer/executors/acrossSwapExecutor";
+import { executeSnowbridgeToPaseo } from "../features/transfer/executors/snowbridgeExecutor";
+import { buildTransferPlan } from "../features/transfer/planner";
+import type { TransferIntent, TransferPlan } from "../features/transfer/types";
+import { waitForDepositFill } from "../services/acrossDepositStatus";
 
 type Network = Env;
 
 const isEvmAddress = (v: string) => /^0x[a-fA-F0-9]{40}$/.test(v.trim());
 
+function isSubstrateRecipient(v: string): boolean {
+  try {
+    return isSubstrateAddress(v.trim());
+  } catch {
+    return false;
+  }
+}
+
 type StepStatus = "idle" | "running" | "success" | "error";
+
+type ProgressLine = {
+  id: string;
+  label: string;
+  status: StepStatus;
+  hash?: string;
+  detail?: string;
+};
 
 type SubmitProgress = {
   started: boolean;
-  approval: StepStatus; // approve tx (ak treba)
-  swap: StepStatus; // bridge tx
+  lines: ProgressLine[];
   done: boolean;
-  hashes: { approval?: string; swap?: string };
   error?: string;
 };
 
 function StepBadge({ status }: { status: StepStatus }) {
   if (status === "running") return <span className="badge badge--spin" aria-label="running" />;
-  if (status === "success") return <span className="badge badge--ok">✓</span>;
-  if (status === "error") return <span className="badge badge--err">×</span>;
-  return <span className="badge badge--idle">•</span>;
+  if (status === "success") return <span className="badge badge--ok">OK</span>;
+  if (status === "error") return <span className="badge badge--err">ERR</span>;
+  return <span className="badge badge--idle">...</span>;
 }
 
 const emptyProgress = (): SubmitProgress => ({
   started: false,
-  approval: "idle",
-  swap: "idle",
+  lines: [],
   done: false,
-  hashes: {},
 });
+
+function buildProgressLines(plan: TransferPlan): ProgressLine[] {
+  const lines: ProgressLine[] = [];
+
+  plan.steps.forEach((step, i) => {
+    if (step.kind === "across") {
+      lines.push({
+        id: `across-${i}-approve`,
+        label: `Across approval (${i + 1})`,
+        status: "idle",
+      });
+      lines.push({
+        id: `across-${i}-bridge`,
+        label: `Across bridge tx (${i + 1})`,
+        status: "idle",
+      });
+
+      if (step.recipientMode === "depositor") {
+        lines.push({
+          id: `across-${i}-wait-fill`,
+          label: `Across fill on Sepolia (${i + 1})`,
+          status: "idle",
+        });
+      }
+      return;
+    }
+
+    lines.push({
+      id: `snowbridge-${i}-bridge`,
+      label: `Snowbridge Sepolia -> Paseo (${i + 1})`,
+      status: "idle",
+    });
+  });
+
+  return lines;
+}
+
+function shortenMiddle(text: string, head = 10, tail = 8): string {
+  if (text.length <= head + tail + 3) return text;
+  return `${text.slice(0, head)}...${text.slice(-tail)}`;
+}
 
 export default function TransferPage() {
   const [network, setNetwork] = useState<Network>("testnet");
@@ -64,10 +125,11 @@ export default function TransferPage() {
 
   const [exec, setExec] = useState<{ hash?: string; status?: string; err?: string }>({});
   const [execLoading, setExecLoading] = useState(false);
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const copiedTimerRef = useRef<number | null>(null);
 
   const [progress, setProgress] = useState<SubmitProgress>(emptyProgress());
 
-  // ---------- Options ----------
   const chainOptions: ComboOption<number>[] = useMemo(
     () => chains.map((c) => ({ value: c.chainId, label: c.name, subLabel: String(c.chainId) })),
     [chains]
@@ -81,33 +143,77 @@ export default function TransferPage() {
         subLabel: t.isNative
           ? "Native"
           : t.address
-          ? `${t.address.slice(0, 6)}…${t.address.slice(-4)}`
-          : "",
+            ? `${t.address.slice(0, 6)}...${t.address.slice(-4)}`
+            : "",
       })),
     [tokens]
   );
 
   const destinationOptions: ComboOption<number>[] = useMemo(
-    () => destinations.map((c) => ({ value: c.chainId, label: c.name, subLabel: String(c.chainId) })),
+    () =>
+      destinations.map((c) => ({ value: c.chainId, label: c.name, subLabel: String(c.chainId) })),
     [destinations]
   );
 
-  const selectedToken = useMemo(
-    () => tokens.find((t) => t.key === tokenKey) ?? null,
-    [tokens, tokenKey]
+  const selectedToken = useMemo(() => tokens.find((t) => t.key === tokenKey) ?? null, [tokens, tokenKey]);
+
+  const recipientIsSubstrate = useMemo(
+    () => destinationChainId != null && isPaseoAssetHubDestination(destinationChainId),
+    [destinationChainId]
   );
 
-  const canSubmit = useMemo(() => {
-    return (
+  const recipientValid = useMemo(() => {
+    const value = recipient.trim();
+    if (!value) return false;
+    return recipientIsSubstrate ? isSubstrateRecipient(value) : isEvmAddress(value);
+  }, [recipient, recipientIsSubstrate]);
+
+  const canSubmit = useMemo(
+    () =>
       sourceChainId != null &&
       tokenKey.length > 0 &&
       destinationChainId != null &&
       amount.trim().length > 0 &&
-      isEvmAddress(recipient)
-    );
-  }, [sourceChainId, tokenKey, destinationChainId, amount, recipient]);
+      recipientValid,
+    [sourceChainId, tokenKey, destinationChainId, amount, recipientValid]
+  );
 
-  // ---------- Load chains when network changes ----------
+  const chainNameById = useMemo(() => {
+    const m = new Map<number, string>();
+    for (const c of chains) m.set(c.chainId, c.name);
+    for (const c of destinations) m.set(c.chainId, c.name);
+    m.set(PASEO_ASSETHUB_CHAIN.chainId, PASEO_ASSETHUB_CHAIN.name);
+    return m;
+  }, [chains, destinations]);
+
+  const recipientLabel = recipientIsSubstrate ? "Recipient (Substrate SS58)" : "Recipient (EVM)";
+
+  const recipientPlaceholder = recipientIsSubstrate ? "12..." : "0x...";
+
+  useEffect(() => {
+    return () => {
+      if (copiedTimerRef.current !== null) {
+        window.clearTimeout(copiedTimerRef.current);
+      }
+    };
+  }, []);
+
+  async function copyText(key: string, text: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedKey(key);
+
+      if (copiedTimerRef.current !== null) {
+        window.clearTimeout(copiedTimerRef.current);
+      }
+      copiedTimerRef.current = window.setTimeout(() => {
+        setCopiedKey((prev) => (prev === key ? null : prev));
+      }, 1400);
+    } catch {
+      setError("Copy failed");
+    }
+  }
+
   useEffect(() => {
     let cancelled = false;
 
@@ -115,7 +221,6 @@ export default function TransferPage() {
       setError(null);
       setLoadingChains(true);
 
-      // reset on env change
       setChains([]);
       setTokens([]);
       setDestinations([]);
@@ -147,7 +252,6 @@ export default function TransferPage() {
     };
   }, [network]);
 
-  // ---------- Load tokens when source changes ----------
   useEffect(() => {
     let cancelled = false;
 
@@ -187,7 +291,6 @@ export default function TransferPage() {
     };
   }, [network, sourceChainId]);
 
-  // ---------- Load destinations when token changes ----------
   useEffect(() => {
     let cancelled = false;
 
@@ -204,11 +307,23 @@ export default function TransferPage() {
 
       setLoadingDestinations(true);
       try {
-        const list = await getAcrossDestinations(network, sourceChainId, tokenKey);
+        const [acrossDestinations] = await Promise.all([
+          getAcrossDestinations(network, sourceChainId, tokenKey),
+        ]);
+
         if (cancelled) return;
 
-        list.sort((a, b) => a.chainId - b.chainId);
-        setDestinations(list);
+        const snowbridgeDestinations = getSnowbridgeDestinations({
+          env: network,
+          originChainId: sourceChainId,
+          tokenKey,
+        });
+
+        const merged = new Map<number, Chain>();
+        for (const chain of acrossDestinations) merged.set(chain.chainId, chain);
+        for (const chain of snowbridgeDestinations) merged.set(chain.chainId, chain);
+
+        setDestinations(Array.from(merged.values()).sort((a, b) => a.chainId - b.chainId));
       } catch (e: any) {
         if (!cancelled) setError(e?.message ?? "Failed to load destinations");
       } finally {
@@ -222,6 +337,13 @@ export default function TransferPage() {
     };
   }, [network, sourceChainId, tokenKey]);
 
+  function updateProgressLine(id: string, patch: Partial<ProgressLine>) {
+    setProgress((prev) => ({
+      ...prev,
+      lines: prev.lines.map((line) => (line.id === id ? { ...line, ...patch } : line)),
+    }));
+  }
+
   function onSubmitPreview() {
     setError(null);
     setExec({});
@@ -229,8 +351,8 @@ export default function TransferPage() {
 
     if (sourceChainId == null || destinationChainId == null || !tokenKey) return;
 
-    if (!isEvmAddress(recipient)) {
-      alert("Invalid EVM address");
+    if (!recipientValid) {
+      alert(recipientIsSubstrate ? "Invalid Substrate recipient address" : "Invalid EVM recipient address");
       return;
     }
 
@@ -259,63 +381,132 @@ export default function TransferPage() {
     setExecLoading(true);
     setExec({});
     setError(null);
-
     setProgress({
       started: true,
-      approval: "running",
-      swap: "idle",
+      lines: buildProgressLines(plan),
       done: false,
-      hashes: {},
     });
 
+    let snowbridgeAmountRawFromAcross: string | undefined;
+
     try {
-      const routes = await getAcrossRoutesRaw(network);
+      const needsAcross = plan.steps.some((step) => step.kind === "across");
+      const routes = needsAcross ? await getAcrossRoutesRaw(network) : [];
 
-      const res = await executeAcrossViaSwapApi({
-        env: network,
-        originChainId: sourceChainId!,
-        destinationChainId: destinationChainId!,
-        tokenKey,
-        amountHuman: amount,
-        recipient: recipient.trim() as `0x${string}`,
-        routes,
-        tokens,
-      });
+      for (let i = 0; i < plan.steps.length; i += 1) {
+        const step = plan.steps[i];
 
-      // approval krok
-      if (res.approvalTxSent) {
-        setProgress((p) => ({
-          ...p,
-          approval: "success",
-          hashes: { ...p.hashes, approval: res.approvalTxHash ?? undefined },
-          swap: "running",
-        }));
-      } else {
-        setProgress((p) => ({
-          ...p,
-          approval: "success",
-          swap: "running",
-        }));
+        if (step.kind === "across") {
+          const approvalLineId = `across-${i}-approve`;
+          const bridgeLineId = `across-${i}-bridge`;
+
+          updateProgressLine(approvalLineId, { status: "running", detail: undefined });
+          updateProgressLine(bridgeLineId, { status: "running", detail: undefined });
+
+          const acrossRecipient =
+            step.recipientMode === "final" ? (recipient.trim() as `0x${string}`) : undefined;
+
+          const res = await executeAcrossViaSwapApi({
+            env: network,
+            originChainId: step.originChainId,
+            destinationChainId: step.destinationChainId,
+            tokenKey: step.tokenKey,
+            amountHuman: amount,
+            recipient: acrossRecipient,
+            routes,
+            tokens,
+          });
+
+          updateProgressLine(approvalLineId, {
+            status: "success",
+            hash: res.approvalTxHash ?? undefined,
+          });
+
+          const bridgeOk = res.swapReceiptStatus === "success";
+          updateProgressLine(bridgeLineId, {
+            status: bridgeOk ? "success" : "error",
+            hash: res.swapTxHash,
+          });
+
+          if (!bridgeOk) {
+            throw new Error("Across bridge transaction reverted.");
+          }
+
+          if (step.recipientMode === "depositor") {
+            const waitLineId = `across-${i}-wait-fill`;
+            updateProgressLine(waitLineId, { status: "running", hash: res.swapTxHash });
+
+            const fill = await waitForDepositFill({
+              env: network,
+              depositTxnRef: res.swapTxHash,
+              timeoutMs: 45 * 60 * 1000,
+              pollIntervalMs: 20 * 1000,
+              onPoll: (status) => updateProgressLine(waitLineId, { detail: status || "pending" }),
+            });
+
+            const fillStatusText =
+              typeof fill.status === "string"
+                ? fill.status
+                : typeof fill.depositStatus === "string"
+                  ? fill.depositStatus
+                  : "filled";
+
+            updateProgressLine(waitLineId, {
+              status: "success",
+              hash: res.swapTxHash,
+              detail: fillStatusText,
+            });
+
+            snowbridgeAmountRawFromAcross = res.minOutputAmount ?? res.expectedOutputAmount;
+            if (!snowbridgeAmountRawFromAcross || snowbridgeAmountRawFromAcross === "0") {
+              throw new Error("Across quote did not return destination output amount for Snowbridge step.");
+            }
+          }
+
+          continue;
+        }
+
+        const snowbridgeLineId = `snowbridge-${i}-bridge`;
+        updateProgressLine(snowbridgeLineId, { status: "running" });
+
+        const amountRaw =
+          step.amountSource === "acrossMinOutput" ? snowbridgeAmountRawFromAcross : undefined;
+
+        if (step.amountSource === "acrossMinOutput" && !amountRaw) {
+          throw new Error("Missing Across output amount for Snowbridge step.");
+        }
+
+        const res = await executeSnowbridgeToPaseo({
+          env: network,
+          recipientSubstrate: recipient.trim(),
+          amountHuman: step.amountSource === "input" ? amount : undefined,
+          amountRaw,
+        });
+
+        const ok = res.status === "success";
+        updateProgressLine(snowbridgeLineId, {
+          status: ok ? "success" : "error",
+          hash: res.txHash,
+          detail: `deliveryFee=${res.deliveryFeeWei}`,
+        });
+
+        if (!ok) {
+          throw new Error("Snowbridge transaction reverted.");
+        }
+
+        setExec({ hash: res.txHash, status: res.status });
       }
 
-      // swap mined
-      const ok = res.swapReceiptStatus === "success";
-      setProgress((p) => ({
-        ...p,
-        swap: ok ? "success" : "error",
-        hashes: { ...p.hashes, swap: res.swapTxHash },
-        done: ok,
-      }));
-
-      setExec({ hash: res.swapTxHash, status: res.swapReceiptStatus });
+      setProgress((prev) => ({ ...prev, done: true }));
     } catch (e: any) {
       const msg = e?.message ?? "Execution failed";
-
       setExec({ err: msg });
-      setProgress((p) => ({
-        ...p,
-        approval: p.approval === "running" ? "error" : p.approval,
-        swap: p.swap === "running" ? "error" : p.swap,
+      setError(msg);
+      setProgress((prev) => ({
+        ...prev,
+        lines: prev.lines.map((line) =>
+          line.status === "running" ? { ...line, status: "error" } : line
+        ),
         done: false,
         error: msg,
       }));
@@ -357,7 +548,7 @@ export default function TransferPage() {
       <form className="form" onSubmit={(e) => e.preventDefault()}>
         <ComboBox
           label="Source chain"
-          placeholder="Type or pick source chain…"
+          placeholder="Type or pick source chain..."
           value={sourceChainId}
           onChange={(v) => setSourceChainId(v)}
           options={chainOptions}
@@ -368,7 +559,7 @@ export default function TransferPage() {
         <div className="row2">
           <ComboBox
             label="Token"
-            placeholder={sourceChainId == null ? "Select source chain first" : "Type or pick token…"}
+            placeholder={sourceChainId == null ? "Select source chain first" : "Type or pick token..."}
             value={tokenKey || null}
             onChange={(v) => setTokenKey(v ?? "")}
             options={tokenOptions}
@@ -395,8 +586,8 @@ export default function TransferPage() {
             sourceChainId == null
               ? "Select source chain first"
               : !tokenKey
-              ? "Select token first"
-              : "Type or pick destination chain…"
+                ? "Select token first"
+                : "Type or pick destination chain..."
           }
           value={destinationChainId}
           onChange={(v) => setDestinationChainId(v)}
@@ -406,10 +597,10 @@ export default function TransferPage() {
         />
 
         <div>
-          <label className="label">Recipient</label>
+          <label className="label">{recipientLabel}</label>
           <input
             className="control"
-            placeholder="0x..."
+            placeholder={recipientPlaceholder}
             value={recipient}
             onChange={(e) => setRecipient(e.target.value)}
             disabled={execLoading}
@@ -446,7 +637,7 @@ export default function TransferPage() {
                 selectedToken.isNative ? (
                   `${selectedToken.symbol} (native)`
                 ) : (
-                  `${selectedToken.symbol} (${selectedToken.address?.slice(0, 6)}…${selectedToken.address?.slice(-4)})`
+                  `${selectedToken.symbol} (${selectedToken.address?.slice(0, 6)}...${selectedToken.address?.slice(-4)})`
                 )
               ) : (
                 tokenKey
@@ -467,13 +658,14 @@ export default function TransferPage() {
 
             {plan.steps.map((step, i) => (
               <div key={i} className="previewStep">
-                <div className="previewStepTitle">Across</div>
+                <div className="previewStepTitle">{step.kind === "across" ? "Across" : "Snowbridge"}</div>
 
                 <div className="previewFlow">
-                  {chains.find((c) => c.chainId === step.originChainId)?.name ?? step.originChainId}
-                  <span className="arrow">→</span>
-                  {chains.find((c) => c.chainId === step.destinationChainId)?.name ??
-                    step.destinationChainId}
+                  {chainNameById.get(step.originChainId) ?? step.originChainId}
+                  <span className="arrow">-&gt;</span>
+                  {step.kind === "across"
+                    ? (chainNameById.get(step.destinationChainId) ?? step.destinationChainId)
+                    : (chainNameById.get(step.destinationParaId) ?? step.destinationParaId)}
                 </div>
 
                 <div className="muted">Wallet required: {step.requiredWallet}</div>
@@ -486,33 +678,76 @@ export default function TransferPage() {
           <div className="previewCard" style={{ marginTop: 14 }}>
             <div className="previewTitle">Submit progress</div>
 
-            <div className="progressRow">
-              <StepBadge status={progress.approval} />
-              <div className="progressText">Approve (if needed)</div>
-              {progress.hashes.approval ? <div className="muted">{progress.hashes.approval}</div> : null}
+            {progress.lines.map((line) => (
+              <div key={line.id} className="progressRow">
+                <StepBadge status={line.status} />
+                <div className="progressContent">
+                  <div className="progressText">{line.label}</div>
+                  {line.detail || line.hash ? (
+                    <div className="progressMeta">
+                      {line.detail ? <div className="muted progressDetail">{line.detail}</div> : null}
+                      {line.hash ? (
+                        <div className="copyLine">
+                          <div className="muted copyValue" title={line.hash}>
+                            {shortenMiddle(line.hash)}
+                          </div>
+                          <button
+                            type="button"
+                            className="copyBtn"
+                            onClick={() => copyText(`progress-${line.id}`, line.hash!)}
+                            aria-label="Copy tx hash"
+                            title="Copy tx hash"
+                          >
+                            <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+                              <rect x="5" y="1.5" width="9.5" height="11" rx="1.5" fill="none" stroke="currentColor" />
+                              <rect x="1.5" y="4.5" width="9.5" height="10" rx="1.5" fill="none" stroke="currentColor" />
+                            </svg>
+                          </button>
+                          {copiedKey === `progress-${line.id}` ? (
+                            <div className="copyStatus">tx hash copied</div>
+                          ) : null}
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            ))}
+
+            <div className="progressSummary">
+              {progress.done ? <div className="muted">Completed</div> : null}
+              {progress.error ? <div className="muted">{progress.error}</div> : null}
+
+              {exec.err ? <div className="muted">{exec.err}</div> : null}
+              {exec.hash ? (
+                <div className="copyLine">
+                  <div className="muted copyValue" title={exec.hash}>Tx: {shortenMiddle(exec.hash)}</div>
+                  <button
+                    type="button"
+                    className="copyBtn"
+                    onClick={() => copyText("exec-hash", exec.hash!)}
+                    aria-label="Copy tx hash"
+                    title="Copy tx hash"
+                  >
+                    <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+                      <rect x="5" y="1.5" width="9.5" height="11" rx="1.5" fill="none" stroke="currentColor" />
+                      <rect x="1.5" y="4.5" width="9.5" height="10" rx="1.5" fill="none" stroke="currentColor" />
+                    </svg>
+                  </button>
+                  {copiedKey === "exec-hash" ? <div className="copyStatus">tx hash copied</div> : null}
+                </div>
+              ) : null}
+              {exec.status ? <div className="muted">Status: {exec.status}</div> : null}
             </div>
-
-            <div className="progressRow">
-              <StepBadge status={progress.swap} />
-              <div className="progressText">Bridge transaction</div>
-              {progress.hashes.swap ? <div className="muted">{progress.hashes.swap}</div> : null}
-            </div>
-
-            {progress.done && <div className="muted" style={{ marginTop: 8 }}>✅ Completed</div>}
-            {progress.error && <div className="muted" style={{ marginTop: 8 }}>{progress.error}</div>}
-
-            {exec.err ? <div className="muted" style={{ marginTop: 8 }}>{exec.err}</div> : null}
-            {exec.hash ? <div className="muted" style={{ marginTop: 8 }}>Tx: {exec.hash}</div> : null}
-            {exec.status ? <div className="muted" style={{ marginTop: 8 }}>Status: {exec.status}</div> : null}
           </div>
         )}
 
         <div className="muted" style={{ marginTop: 10, fontSize: 12 }}>
           {loadingChains || loadingTokens || loadingDestinations
-            ? "Fetching Across catalog…"
+            ? "Fetching catalog..."
             : canSubmit
-            ? `Ready: ${sourceChainId} → ${destinationChainId}`
-            : "Pick source, token, destination, amount, recipient."}
+              ? `Ready: ${sourceChainId} -> ${destinationChainId}`
+              : "Pick source, token, destination, amount, recipient."}
         </div>
       </form>
     </section>

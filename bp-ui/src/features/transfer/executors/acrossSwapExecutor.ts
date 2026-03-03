@@ -3,8 +3,8 @@ import { amountToRawString } from "../../../utils/amount";
 import { fetchSwapApproval } from "../../../services/acrossSwapApproval";
 import type { AcrossRoute, Env, Token } from "../../../catalog/types";
 import { getRpcUrl } from "../../../evm/rpcs";
-
-
+import { ensureWalletChain } from "../../../evm/ensureWalletChain";
+import { getSafeFeeOverrides, type FeeOverrides } from "../../../evm/feeOverrides";
 
 function optPositiveBigInt(v: unknown): bigint | undefined {
   if (v === null || v === undefined) return undefined;
@@ -21,9 +21,7 @@ function findRoute(
   tokenKey: string
 ) {
   const isNative = tokenKey === "native";
-  const addr = tokenKey.startsWith("erc20:")
-    ? tokenKey.slice("erc20:".length).toLowerCase()
-    : null;
+  const addr = tokenKey.startsWith("erc20:") ? tokenKey.slice("erc20:".length).toLowerCase() : null;
 
   const r = routes.find((x) => {
     if (x.originChainId !== originChainId) return false;
@@ -39,20 +37,33 @@ function findRoute(
   return r;
 }
 
+function applyFeeOverrides(request: any, feeOverrides: FeeOverrides) {
+  if (feeOverrides.gasPrice !== undefined) {
+    request.gasPrice = feeOverrides.gasPrice;
+    return;
+  }
+
+  if (feeOverrides.maxFeePerGas !== undefined) {
+    request.maxFeePerGas = feeOverrides.maxFeePerGas;
+  }
+  if (feeOverrides.maxPriorityFeePerGas !== undefined) {
+    request.maxPriorityFeePerGas = feeOverrides.maxPriorityFeePerGas;
+  }
+}
+
 export async function executeAcrossViaSwapApi(args: {
   env: Env;
   originChainId: number;
   destinationChainId: number;
   tokenKey: string;
   amountHuman: string;
-  recipient: Address;
+  recipient?: Address;
   routes: AcrossRoute[];
   tokens: Token[];
 }) {
   const eth = (window as any).ethereum;
   if (!eth) throw new Error("MetaMask not found");
 
-  // MetaMask signer
   const walletClient = createWalletClient({
     transport: custom(eth),
   });
@@ -60,9 +71,8 @@ export async function executeAcrossViaSwapApi(args: {
   const [account] = await walletClient.requestAddresses();
   if (!account) throw new Error("No account connected");
 
-  await walletClient.switchChain({ id: args.originChainId });
+  await ensureWalletChain(eth, args.originChainId);
 
-  // Public client cez RPC pre confirmations
   const rpcUrl = getRpcUrl(args.originChainId);
   const publicClient = createPublicClient({
     chain: {
@@ -82,7 +92,6 @@ export async function executeAcrossViaSwapApi(args: {
   const amountRaw = amountToRawString(args.amountHuman, decimals);
   if (amountRaw === "0") throw new Error("Amount must be > 0");
 
-  // token addresses from route (works for native too)
   const inputToken = route.originToken;
   const outputToken = route.destinationToken;
 
@@ -106,51 +115,48 @@ export async function executeAcrossViaSwapApi(args: {
     throw new Error("Across /swap/approval did not return swapTx");
   }
 
-  // 1) approve (ak existuje)
   let approvalHash: Hex | null = null;
   if (approvalTx?.to && approvalTx?.data) {
-    approvalHash = await walletClient.sendTransaction({
+    const approvalFeeOverrides = await getSafeFeeOverrides(publicClient);
+    const approvalReq: any = {
       chain: null,
       account: account as Address,
       to: approvalTx.to,
       data: approvalTx.data,
       value: approvalTx.value ? BigInt(approvalTx.value) : 0n,
       gas: optPositiveBigInt(approvalTx.gas),
-      maxFeePerGas: approvalTx.maxFeePerGas ? BigInt(approvalTx.maxFeePerGas) : undefined,
-      maxPriorityFeePerGas: approvalTx.maxPriorityFeePerGas
-        ? BigInt(approvalTx.maxPriorityFeePerGas)
-        : undefined,
-    });
+    };
+    applyFeeOverrides(approvalReq, approvalFeeOverrides);
 
-    // ✅ confirmation
+    approvalHash = await walletClient.sendTransaction(approvalReq);
+
     await publicClient.waitForTransactionReceipt({ hash: approvalHash });
   }
 
-  // 2) swap (bridge)
-  const swapHash = await walletClient.sendTransaction({
+  const swapFeeOverrides = await getSafeFeeOverrides(publicClient);
+  const swapReq: any = {
     chain: null,
     account: account as Address,
     to: swapTx.to,
     data: swapTx.data,
-    value: swapTx.value
-      ? BigInt(swapTx.value)
-      : args.tokenKey === "native"
-      ? BigInt(amountRaw)
-      : 0n,
+    value: swapTx.value ? BigInt(swapTx.value) : args.tokenKey === "native" ? BigInt(amountRaw) : 0n,
     gas: optPositiveBigInt(swapTx.gas),
-    maxFeePerGas: swapTx.maxFeePerGas ? BigInt(swapTx.maxFeePerGas) : undefined,
-    maxPriorityFeePerGas: swapTx.maxPriorityFeePerGas
-      ? BigInt(swapTx.maxPriorityFeePerGas)
-      : undefined,
-  });
+  };
+  applyFeeOverrides(swapReq, swapFeeOverrides);
 
-  // ✅ confirmation
+  const swapHash = await walletClient.sendTransaction(swapReq);
+
   const receipt = await publicClient.waitForTransactionReceipt({ hash: swapHash });
 
   return {
+    account: account as Address,
     approvalTxSent: !!approvalTx,
     approvalTxHash: approvalHash,
     swapTxHash: swapHash,
     swapReceiptStatus: receipt.status, // "success" | "reverted"
+    expectedOutputAmount: resp.expectedOutputAmount,
+    minOutputAmount: resp.minOutputAmount,
+    expectedFillTimeSec: resp.expectedFillTime,
+    quoteId: resp.id,
   };
 }

@@ -12,6 +12,10 @@ let cachedRoutes: AcrossRoute[] = [];
 let lastFetch = 0;
 const TTL = 1000 * 60 * 5; // 5 min
 
+function isDefined<T>(v: T | null | undefined): v is T {
+  return v !== null && v !== undefined;
+}
+
 function normalizeRoutes(json: any): AcrossRoute[] {
   const arr: any[] | null =
     Array.isArray(json) ? json :
@@ -78,18 +82,18 @@ export async function getAcrossChains(env: Env): Promise<Chain[]> {
 
   return Array.from(chainIds)
     .sort((a, b) => a - b)
-    .map((chainId) => {
+    .map((chainId): Chain | null => {
       const name = getEvmChainName(chainId);
-      return name
-        ? ({
-            id: String(chainId),
-            chainId,
-            name,
-            type: "evm" as const,
-          } satisfies Chain)
-        : null;
+      if (!name) return null;
+
+      return {
+        id: String(chainId),
+        chainId,
+        name,
+        type: "evm",
+      };
     })
-    .filter((x): x is Chain => x !== null);
+    .filter(isDefined);
 }
 
 
@@ -155,13 +159,13 @@ export async function getAcrossDestinations(
 
   return Array.from(destIds)
     .sort((a, b) => a - b)
-    .map((chainId) => {
+    .map((chainId): Chain | null => {
       const name = getEvmChainName(chainId);
-      return name
-        ? ({ id: String(chainId), chainId, name, type: "evm" as const } satisfies Chain)
-        : null;
+      if (!name) return null;
+
+      return { id: String(chainId), chainId, name, type: "evm" };
     })
-    .filter((x): x is Chain => x !== null);
+    .filter(isDefined);
 }
 
 

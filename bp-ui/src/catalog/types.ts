@@ -4,7 +4,7 @@ export type Chain = {
   id: string;          // string pre unified UI
   chainId: number;     // EVM chainId
   name: string;
-  type: "evm";
+  type: "evm" | "substrate";
 };
 
 export type Token = {

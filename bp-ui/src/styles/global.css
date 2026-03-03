@@ -290,3 +290,121 @@ select.control:disabled {
   opacity: 0.7;
 }
 
+.progressRow {
+  display: grid;
+  grid-template-columns: 28px 1fr;
+  gap: 0 12px;
+  align-items: start;
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  margin-bottom: 6px;
+}
+
+.progressContent {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.progressText {
+  font-size: 14px;
+  line-height: 1.25;
+}
+
+.progressMeta {
+  display: grid;
+  gap: 6px;
+}
+
+.progressDetail {
+  line-height: 1.2;
+}
+
+.progressSummary {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.copyLine {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.copyValue {
+  white-space: nowrap;
+  line-height: 1.2;
+}
+
+.copyBtn {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.82);
+  cursor: pointer;
+  padding: 0;
+}
+
+.copyBtn:hover {
+  border-color: rgba(216, 179, 90, 0.55);
+  color: #ffffff;
+}
+
+.copyStatus {
+  font-size: 12px;
+  color: rgba(139, 232, 143, 0.95);
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  min-width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  font-size: 10px;
+  letter-spacing: 0.03em;
+}
+
+.badge--idle {
+  color: rgba(255, 255, 255, 0.58);
+}
+
+.badge--ok {
+  color: #8be88f;
+  border-color: rgba(139, 232, 143, 0.45);
+  background: rgba(139, 232, 143, 0.12);
+}
+
+.badge--err {
+  color: #ff9b9b;
+  border-color: rgba(255, 155, 155, 0.45);
+  background: rgba(255, 155, 155, 0.12);
+}
+
+.badge--spin {
+  border-color: rgba(216, 179, 90, 0.55);
+  border-top-color: transparent;
+  animation: badgeSpin 1s linear infinite;
+}
+
+@keyframes badgeSpin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+

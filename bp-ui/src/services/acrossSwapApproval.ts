@@ -19,13 +19,20 @@ export type AcrossTx = {
 export type SwapApprovalResponse = {
   approvalTx?: AcrossTx | null;
   swapTx?: AcrossTx | null;
-  // API vracia aj ďalšie polia (allowanceState, balanceState, atď.) – zatiaľ nepotrebujeme
+  expectedOutputAmount?: string;
+  minOutputAmount?: string;
+  expectedFillTime?: number;
+  quoteExpiryTimestamp?: number;
+  id?: string;
 };
+
+
+
 
 export async function fetchSwapApproval(params: {
   env: Env;
   tradeType: "exactInput";
-  amount: string; // raw (decimal string)
+  amount: string; // raw (decimal string)r 
   inputToken: string;
   outputToken: string;
   originChainId: number;
@@ -47,6 +54,11 @@ export async function fetchSwapApproval(params: {
   url.searchParams.set("slippage", params.slippage ?? "auto");
 
   const res = await fetch(url.toString());
-  if (!res.ok) throw new Error(`Across /swap/approval failed (${res.status}) ${await res.text().catch(() => "")}`);
+  if (!res.ok) {
+    throw new Error(
+      `Across /swap/approval failed (${res.status}) ${await res.text().catch(() => "")}`
+    );
+  }
+
   return (await res.json()) as SwapApprovalResponse;
 }
