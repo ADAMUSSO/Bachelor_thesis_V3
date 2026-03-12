@@ -1,0 +1,122 @@
+<mxfile host="app.diagrams.net" agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36" version="26.2.14">
+  <diagram name="Page-1" id="1RsJILLQBnZ1xZOVxIOa">
+    <mxGraphModel dx="1831" dy="1795" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="0" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="nUa1nI_laG_hwp2V5dIM-1" value="Web application&lt;div&gt;&lt;br&gt;&lt;/div&gt;" style="shape=folder;xSize=90;align=left;spacingLeft=10;align=left;verticalAlign=top;spacingLeft=5;spacingTop=-4;tabWidth=95;tabHeight=21;tabPosition=left;html=1;recursiveResize=0;" vertex="1" parent="1">
+          <mxGeometry x="-388" y="-96" width="412" height="416" as="geometry" />
+        </mxCell>
+        <mxCell id="nUa1nI_laG_hwp2V5dIM-19" style="edgeStyle=none;curved=1;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;fontSize=12;startSize=8;endSize=8;" edge="1" parent="1" source="nUa1nI_laG_hwp2V5dIM-6" target="nUa1nI_laG_hwp2V5dIM-1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="nUa1nI_laG_hwp2V5dIM-32" style="edgeStyle=none;curved=1;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;fontSize=12;startSize=8;endSize=8;" edge="1" parent="1" source="nUa1nI_laG_hwp2V5dIM-6" target="nUa1nI_laG_hwp2V5dIM-15">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="nUa1nI_laG_hwp2V5dIM-33" value="request signature(bridge)" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];fontSize=12;" vertex="1" connectable="0" parent="nUa1nI_laG_hwp2V5dIM-32">
+          <mxGeometry x="0.3691" relative="1" as="geometry">
+            <mxPoint x="8" y="-11" as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="nUa1nI_laG_hwp2V5dIM-6" value="User&lt;div&gt;&lt;br&gt;&lt;/div&gt;" style="shape=umlActor;verticalLabelPosition=bottom;verticalAlign=top;html=1;outlineConnect=0;" vertex="1" parent="1">
+          <mxGeometry x="100" y="-188" width="30" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="nUa1nI_laG_hwp2V5dIM-35" style="edgeStyle=none;curved=1;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;fontSize=12;startSize=8;endSize=8;" edge="1" parent="1" source="nUa1nI_laG_hwp2V5dIM-12" target="nUa1nI_laG_hwp2V5dIM-29">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="nUa1nI_laG_hwp2V5dIM-12" value="Web App UI&lt;div&gt;-select route&lt;/div&gt;&lt;div&gt;-select amount+ token&lt;/div&gt;&lt;div&gt;-wrap/unwrap&lt;/div&gt;&lt;div&gt;-check balance&lt;/div&gt;" style="rounded=0;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="-352.5" y="-62" width="197" height="124" as="geometry" />
+        </mxCell>
+        <mxCell id="nUa1nI_laG_hwp2V5dIM-16" value="" style="group" vertex="1" connectable="0" parent="1">
+          <mxGeometry x="175" y="-4" width="296" height="126" as="geometry" />
+        </mxCell>
+        <mxCell id="nUa1nI_laG_hwp2V5dIM-10" value="&lt;div&gt;Wallets&lt;/div&gt;" style="shape=folder;xSize=90;align=left;spacingLeft=10;align=left;verticalAlign=top;spacingLeft=5;spacingTop=-4;tabWidth=95;tabHeight=21;tabPosition=left;html=1;recursiveResize=0;" vertex="1" parent="nUa1nI_laG_hwp2V5dIM-16">
+          <mxGeometry width="296" height="126" as="geometry" />
+        </mxCell>
+        <mxCell id="nUa1nI_laG_hwp2V5dIM-14" value="Talisman(polkadot signing)" style="rounded=0;whiteSpace=wrap;html=1;" vertex="1" parent="nUa1nI_laG_hwp2V5dIM-16">
+          <mxGeometry x="18" y="43" width="120" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="nUa1nI_laG_hwp2V5dIM-15" value="Metamask(ethereum&amp;nbsp; signing)" style="rounded=0;whiteSpace=wrap;html=1;" vertex="1" parent="nUa1nI_laG_hwp2V5dIM-16">
+          <mxGeometry x="157" y="43" width="120" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="nUa1nI_laG_hwp2V5dIM-17" style="edgeStyle=none;curved=1;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0;exitDx=0;exitDy=0;fontSize=12;startSize=8;endSize=8;" edge="1" parent="nUa1nI_laG_hwp2V5dIM-16" source="nUa1nI_laG_hwp2V5dIM-14" target="nUa1nI_laG_hwp2V5dIM-14">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="nUa1nI_laG_hwp2V5dIM-53" style="edgeStyle=none;curved=1;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;fontSize=12;startSize=8;endSize=8;" edge="1" parent="1" source="nUa1nI_laG_hwp2V5dIM-29" target="nUa1nI_laG_hwp2V5dIM-43">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="nUa1nI_laG_hwp2V5dIM-54" value="Environment pool" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];fontSize=12;" vertex="1" connectable="0" parent="nUa1nI_laG_hwp2V5dIM-53">
+          <mxGeometry x="0.4693" y="-3" relative="1" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="nUa1nI_laG_hwp2V5dIM-29" value="Routing layer&lt;div&gt;-environment switch&lt;/div&gt;&lt;div&gt;-choose path: snowbridge or snowbridge + XCM&lt;/div&gt;&lt;div&gt;-build transaction&lt;/div&gt;&lt;div&gt;-handle multi-hop&lt;/div&gt;" style="rounded=0;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="-348" y="111" width="188" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="nUa1nI_laG_hwp2V5dIM-30" style="edgeStyle=none;curved=1;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.428;entryY=0.075;entryDx=0;entryDy=0;entryPerimeter=0;fontSize=12;startSize=8;endSize=8;" edge="1" parent="1" source="nUa1nI_laG_hwp2V5dIM-6" target="nUa1nI_laG_hwp2V5dIM-14">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="nUa1nI_laG_hwp2V5dIM-31" value="request signature(XCM transfer)" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];fontSize=12;" vertex="1" connectable="0" parent="nUa1nI_laG_hwp2V5dIM-30">
+          <mxGeometry x="-0.3466" y="-2" relative="1" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="nUa1nI_laG_hwp2V5dIM-41" value="" style="group" vertex="1" connectable="0" parent="1">
+          <mxGeometry x="81" y="314" width="484" height="478" as="geometry" />
+        </mxCell>
+        <mxCell id="nUa1nI_laG_hwp2V5dIM-36" value="Main SDK" style="shape=folder;xSize=90;align=left;spacingLeft=10;align=left;verticalAlign=top;spacingLeft=5;spacingTop=-4;tabWidth=95;tabHeight=21;tabPosition=left;html=1;recursiveResize=0;" vertex="1" parent="nUa1nI_laG_hwp2V5dIM-41">
+          <mxGeometry width="286" height="121" as="geometry" />
+        </mxCell>
+        <mxCell id="nUa1nI_laG_hwp2V5dIM-37" value="ParaSpell SDK(XCM Builder&lt;span style=&quot;background-color: transparent; color: light-dark(rgb(0, 0, 0), rgb(255, 255, 255));&quot;&gt;)&lt;/span&gt;" style="rounded=0;whiteSpace=wrap;html=1;" vertex="1" parent="nUa1nI_laG_hwp2V5dIM-41">
+          <mxGeometry x="11" y="40" width="120" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="nUa1nI_laG_hwp2V5dIM-40" value="Snowbridge SDK(heterogenous bridge)" style="rounded=0;whiteSpace=wrap;html=1;" vertex="1" parent="nUa1nI_laG_hwp2V5dIM-41">
+          <mxGeometry x="150" y="42" width="120" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="nUa1nI_laG_hwp2V5dIM-42" style="edgeStyle=none;curved=1;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0;exitY=0;exitDx=0;exitDy=0;fontSize=12;startSize=8;endSize=8;" edge="1" parent="nUa1nI_laG_hwp2V5dIM-41" source="nUa1nI_laG_hwp2V5dIM-40" target="nUa1nI_laG_hwp2V5dIM-40">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="nUa1nI_laG_hwp2V5dIM-50" value="" style="group" vertex="1" connectable="0" parent="1">
+          <mxGeometry x="-410" y="507" width="387" height="267" as="geometry" />
+        </mxCell>
+        <mxCell id="nUa1nI_laG_hwp2V5dIM-43" value="Environments" style="shape=label;xSize=90;align=left;spacingLeft=10;align=left;verticalAlign=top;spacingLeft=5;spacingTop=-4;tabWidth=95;tabHeight=21;tabPosition=left;html=1;recursiveResize=0;rounded=0;whiteSpace=wrap;" vertex="1" parent="nUa1nI_laG_hwp2V5dIM-50">
+          <mxGeometry width="387" height="267" as="geometry" />
+        </mxCell>
+        <mxCell id="nUa1nI_laG_hwp2V5dIM-45" value="Mainnet" style="rounded=0;whiteSpace=wrap;html=1;" vertex="1" parent="nUa1nI_laG_hwp2V5dIM-50">
+          <mxGeometry x="233" y="28" width="120" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="nUa1nI_laG_hwp2V5dIM-46" value="Ethereum&lt;div&gt;&amp;lt;-&amp;gt;&lt;/div&gt;&lt;div&gt;Polkadot&lt;/div&gt;" style="rounded=0;whiteSpace=wrap;html=1;" vertex="1" parent="nUa1nI_laG_hwp2V5dIM-50">
+          <mxGeometry x="233" y="169" width="120" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="nUa1nI_laG_hwp2V5dIM-44" value="Testnets" style="rounded=0;whiteSpace=wrap;html=1;" vertex="1" parent="nUa1nI_laG_hwp2V5dIM-50">
+          <mxGeometry x="30.5" y="28" width="120" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="nUa1nI_laG_hwp2V5dIM-47" value="Paseo&lt;div&gt;&amp;lt;-&lt;span style=&quot;background-color: transparent; color: light-dark(rgb(0, 0, 0), rgb(255, 255, 255));&quot;&gt;&amp;gt;&lt;/span&gt;&lt;/div&gt;&lt;div&gt;Sepolia,&lt;br&gt;&lt;div&gt;westned&lt;/div&gt;&lt;div&gt;&amp;lt;-&amp;gt;&lt;/div&gt;&lt;div&gt;sepolia&lt;/div&gt;&lt;/div&gt;" style="rounded=0;whiteSpace=wrap;html=1;" vertex="1" parent="nUa1nI_laG_hwp2V5dIM-50">
+          <mxGeometry x="32" y="152" width="117" height="94" as="geometry" />
+        </mxCell>
+        <mxCell id="nUa1nI_laG_hwp2V5dIM-49" style="edgeStyle=none;curved=1;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;fontSize=12;startSize=8;endSize=8;" edge="1" parent="nUa1nI_laG_hwp2V5dIM-50" source="nUa1nI_laG_hwp2V5dIM-45" target="nUa1nI_laG_hwp2V5dIM-46">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="nUa1nI_laG_hwp2V5dIM-48" style="edgeStyle=none;curved=1;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;fontSize=12;startSize=8;endSize=8;" edge="1" parent="nUa1nI_laG_hwp2V5dIM-50" source="nUa1nI_laG_hwp2V5dIM-44" target="nUa1nI_laG_hwp2V5dIM-47">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="nUa1nI_laG_hwp2V5dIM-51" style="edgeStyle=none;curved=1;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;fontSize=12;startSize=8;endSize=8;" edge="1" parent="1" source="nUa1nI_laG_hwp2V5dIM-14" target="nUa1nI_laG_hwp2V5dIM-12">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="nUa1nI_laG_hwp2V5dIM-52" value="Used for signing transfers" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];fontSize=12;" vertex="1" connectable="0" parent="nUa1nI_laG_hwp2V5dIM-51">
+          <mxGeometry x="-0.2468" y="4" relative="1" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="nUa1nI_laG_hwp2V5dIM-55" style="edgeStyle=none;curved=1;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.578;entryY=0.196;entryDx=0;entryDy=0;entryPerimeter=0;fontSize=12;startSize=8;endSize=8;" edge="1" parent="1" source="nUa1nI_laG_hwp2V5dIM-29" target="nUa1nI_laG_hwp2V5dIM-36">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="nUa1nI_laG_hwp2V5dIM-56" value="imported functions" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];fontSize=12;" vertex="1" connectable="0" parent="nUa1nI_laG_hwp2V5dIM-55">
+          <mxGeometry x="0.1529" y="4" relative="1" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

@@ -1,0 +1,20 @@
+17 maj koferencia brains zatial
+
+napisat clanok do 17 maj 
+
+
+AIM teraz:
+do buduceho tyzdna spisat introduction v clanku 
+dalsi backround
+dalsi related works
+dalsie dva opisovat dizajn(high level overview) a implementaciu
+dalsi tyzden testy a conclusion
+
+
+Nakamoto nespominat vsetci to vedia na zaciatku urcite nie 
+
+
+dokoncovat  testy
+
+tak 100 transakcii a tetovat casy kedy to dojde 
+10 zdrojov do introduction 5-6
