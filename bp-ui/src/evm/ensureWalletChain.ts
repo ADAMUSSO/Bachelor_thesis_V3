@@ -13,6 +13,26 @@ type AddEthereumChainParameter = {
 };
 
 const CHAIN_CONFIG: Record<number, Omit<AddEthereumChainParameter, "chainId" | "rpcUrls">> = {
+  1: {
+    chainName: "Ethereum Mainnet",
+    nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+    blockExplorerUrls: ["https://etherscan.io"],
+  },
+  10: {
+    chainName: "Optimism",
+    nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+    blockExplorerUrls: ["https://optimistic.etherscan.io"],
+  },
+  8453: {
+    chainName: "Base",
+    nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+    blockExplorerUrls: ["https://basescan.org"],
+  },
+  42161: {
+    chainName: "Arbitrum One",
+    nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+    blockExplorerUrls: ["https://arbiscan.io"],
+  },
   11155111: {
     chainName: "Ethereum Sepolia",
     nativeCurrency: { name: "Sepolia Ether", symbol: "ETH", decimals: 18 },

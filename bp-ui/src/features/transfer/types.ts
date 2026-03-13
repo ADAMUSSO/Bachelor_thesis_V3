@@ -23,8 +23,8 @@ export type SnowbridgeTransferStep = {
   kind: "snowbridge";
   requiredWallet: "evm";
 
-  originChainId: number; // Ethereum Sepolia
-  destinationParaId: number; // Paseo Asset Hub
+  originChainId: number; // Ethereum mainnet or Sepolia
+  destinationParaId: number; // Polkadot/Paseo Asset Hub
   tokenKey: "native";
   amountSource: "input" | "acrossMinOutput";
 };

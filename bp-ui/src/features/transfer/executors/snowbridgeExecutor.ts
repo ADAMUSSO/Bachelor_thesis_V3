@@ -3,9 +3,9 @@ import { assetsV2, Context, toPolkadotV2 } from "@snowbridge/api";
 import { bridgeInfoFor } from "@snowbridge/registry";
 import { createPublicClient, createWalletClient, custom, http, type Address } from "viem";
 import type { Env } from "../../../catalog/types";
+import { getSnowbridgeConfig } from "../../../catalog/snowbridgeCatalog";
 import { amountToRawString } from "../../../utils/amount";
 import { getRpcUrl } from "../../../evm/rpcs";
-import { PASEO_ASSETHUB_PARA_ID, SEPOLIA_CHAIN_ID } from "../../../catalog/snowbridgeCatalog";
 import { ensureWalletChain } from "../../../evm/ensureWalletChain";
 import { getSafeFeeOverrides, type FeeOverrides } from "../../../evm/feeOverrides";
 
@@ -52,7 +52,9 @@ function validationError(logs: unknown): string {
     })
     .filter(Boolean);
 
-  return messages.length ? `Snowbridge validation failed: ${messages.join(" | ")}` : "Snowbridge validation failed.";
+  return messages.length
+    ? `Snowbridge validation failed: ${messages.join(" | ")}`
+    : "Snowbridge validation failed.";
 }
 
 function applyFeeOverrides(request: any, feeOverrides: FeeOverrides) {
@@ -69,15 +71,13 @@ function applyFeeOverrides(request: any, feeOverrides: FeeOverrides) {
   }
 }
 
-export async function executeSnowbridgeToPaseo(args: {
+export async function executeSnowbridgeToAssetHub(args: {
   env: Env;
   recipientSubstrate: string;
   amountHuman?: string;
   amountRaw?: string;
 }) {
-  if (args.env !== "testnet") {
-    throw new Error("Snowbridge to Paseo Asset Hub is enabled only on testnet.");
-  }
+  const config = getSnowbridgeConfig(args.env);
 
   const eth = (window as any).ethereum;
   if (!eth) throw new Error("MetaMask not found");
@@ -89,37 +89,34 @@ export async function executeSnowbridgeToPaseo(args: {
   const [account] = await walletClient.requestAddresses();
   if (!account) throw new Error("No account connected");
 
-  await ensureWalletChain(eth, SEPOLIA_CHAIN_ID);
+  await ensureWalletChain(eth, config.l1ChainId);
 
-  const rpcUrl = getRpcUrl(SEPOLIA_CHAIN_ID);
+  const rpcUrl = getRpcUrl(config.l1ChainId);
   const publicClient = createPublicClient({
     chain: {
-      id: SEPOLIA_CHAIN_ID,
-      name: "Ethereum Sepolia",
+      id: config.l1ChainId,
+      name: config.l1ChainId === 1 ? "Ethereum" : "Ethereum Sepolia",
       nativeCurrency: { name: "ETH", symbol: "ETH", decimals: 18 },
       rpcUrls: { default: { http: [rpcUrl] } },
     } as any,
     transport: http(rpcUrl),
   });
 
-  const amountRaw =
-    args.amountRaw ?? amountToRawString(args.amountHuman ?? "", 18);
-
+  const amountRaw = args.amountRaw ?? amountToRawString(args.amountHuman ?? "", 18);
   const amountWei = BigInt(amountRaw);
   if (amountWei <= 0n) throw new Error("Amount must be > 0 for Snowbridge transfer.");
 
-  const snowbridgeEnv = String((import.meta as any).env?.VITE_SNOWBRIDGE_ENV ?? "paseo_sepolia");
-  const { registry, environment } = bridgeInfoFor(snowbridgeEnv as any);
+  const { registry, environment } = bridgeInfoFor(config.bridgeEnv);
   const context = new Context(environment);
 
   try {
-    context.setEthProvider(SEPOLIA_CHAIN_ID, new BrowserProvider(eth));
+    context.setEthProvider(config.l1ChainId, new BrowserProvider(eth));
 
     const fee = await toPolkadotV2.getDeliveryFee(
       context,
       registry,
       assetsV2.ETHER_TOKEN_ADDRESS,
-      PASEO_ASSETHUB_PARA_ID
+      config.assetHubParaId
     );
 
     const transfer = await toPolkadotV2.createTransfer(
@@ -127,7 +124,7 @@ export async function executeSnowbridgeToPaseo(args: {
       account,
       args.recipientSubstrate.trim(),
       assetsV2.ETHER_TOKEN_ADDRESS,
-      PASEO_ASSETHUB_PARA_ID,
+      config.assetHubParaId,
       amountWei,
       fee
     );
@@ -150,15 +147,15 @@ export async function executeSnowbridgeToPaseo(args: {
     applyFeeOverrides(txReq, feeOverrides);
 
     const hash = await walletClient.sendTransaction(txReq);
-
     const receipt = await publicClient.waitForTransactionReceipt({ hash });
 
     return {
       txHash: hash,
-      status: receipt.status, // "success" | "reverted"
+      status: receipt.status,
       amountRaw,
       deliveryFeeWei: fee.totalFeeInWei.toString(),
       executionFeeWei: (validation.data.feeInfo?.executionFee ?? 0n).toString(),
+      destinationName: config.destinationName,
     };
   } finally {
     await context.destroyContext();

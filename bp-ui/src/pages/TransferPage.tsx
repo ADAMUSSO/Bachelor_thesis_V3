@@ -7,14 +7,15 @@ import {
   getAcrossTokensForChain,
 } from "../catalog/acrossCatalog";
 import {
+  getSnowbridgeConfig,
   getSnowbridgeDestinations,
-  isPaseoAssetHubDestination,
-  PASEO_ASSETHUB_CHAIN,
+  getSnowbridgeProgressLabel,
+  isSnowbridgeDestination,
 } from "../catalog/snowbridgeCatalog";
 import type { Chain, Env, Token } from "../catalog/types";
 import ComboBox, { type ComboOption } from "../components/ComboBox";
 import { executeAcrossViaSwapApi } from "../features/transfer/executors/acrossSwapExecutor";
-import { executeSnowbridgeToPaseo } from "../features/transfer/executors/snowbridgeExecutor";
+import { executeSnowbridgeToAssetHub } from "../features/transfer/executors/snowbridgeExecutor";
 import { buildTransferPlan } from "../features/transfer/planner";
 import type { TransferIntent, TransferPlan } from "../features/transfer/types";
 import { waitForDepositFill } from "../services/acrossDepositStatus";
@@ -89,7 +90,7 @@ function buildProgressLines(plan: TransferPlan): ProgressLine[] {
 
     lines.push({
       id: `snowbridge-${i}-bridge`,
-      label: `Snowbridge Sepolia -> Paseo (${i + 1})`,
+      label: `${getSnowbridgeProgressLabel(step.originChainId)} (${i + 1})`,
       status: "idle",
     });
   });
@@ -156,9 +157,10 @@ export default function TransferPage() {
   );
 
   const selectedToken = useMemo(() => tokens.find((t) => t.key === tokenKey) ?? null, [tokens, tokenKey]);
+  const snowbridgeConfig = useMemo(() => getSnowbridgeConfig(network), [network]);
 
   const recipientIsSubstrate = useMemo(
-    () => destinationChainId != null && isPaseoAssetHubDestination(destinationChainId),
+    () => destinationChainId != null && isSnowbridgeDestination(destinationChainId),
     [destinationChainId]
   );
 
@@ -182,9 +184,9 @@ export default function TransferPage() {
     const m = new Map<number, string>();
     for (const c of chains) m.set(c.chainId, c.name);
     for (const c of destinations) m.set(c.chainId, c.name);
-    m.set(PASEO_ASSETHUB_CHAIN.chainId, PASEO_ASSETHUB_CHAIN.name);
+    m.set(snowbridgeConfig.destinationChain.chainId, snowbridgeConfig.destinationChain.name);
     return m;
-  }, [chains, destinations]);
+  }, [chains, destinations, snowbridgeConfig]);
 
   const recipientLabel = recipientIsSubstrate ? "Recipient (Substrate SS58)" : "Recipient (EVM)";
 
@@ -476,7 +478,7 @@ export default function TransferPage() {
           throw new Error("Missing Across output amount for Snowbridge step.");
         }
 
-        const res = await executeSnowbridgeToPaseo({
+        const res = await executeSnowbridgeToAssetHub({
           env: network,
           recipientSubstrate: recipient.trim(),
           amountHuman: step.amountSource === "input" ? amount : undefined,

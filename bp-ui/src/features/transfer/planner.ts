@@ -1,4 +1,4 @@
-import { PASEO_ASSETHUB_PARA_ID, SEPOLIA_CHAIN_ID, supportsSnowbridgeDestination } from "../../catalog/snowbridgeCatalog";
+import { getSnowbridgeConfig, isSnowbridgeDestination, supportsSnowbridgeDestination } from "../../catalog/snowbridgeCatalog";
 import type { TransferIntent, TransferPlan } from "./types";
 
 export function buildTransferPlan(intent: TransferIntent): TransferPlan {
@@ -14,9 +14,9 @@ export function buildTransferPlan(intent: TransferIntent): TransferPlan {
     throw new Error("Invalid amount");
   }
 
-  const destinationIsPaseoAssetHub = intent.destinationChainId === PASEO_ASSETHUB_PARA_ID;
+  const destinationIsAssetHub = isSnowbridgeDestination(intent.destinationChainId);
 
-  if (!destinationIsPaseoAssetHub) {
+  if (!destinationIsAssetHub) {
     return {
       steps: [
         {
@@ -38,19 +38,22 @@ export function buildTransferPlan(intent: TransferIntent): TransferPlan {
       tokenKey: intent.tokenKey,
     })
   ) {
+    const config = getSnowbridgeConfig(intent.env);
     throw new Error(
-      "Snowbridge to Paseo Asset Hub is available only on testnet for native ETH from Sepolia or supported L2 testnets."
+      `Snowbridge to ${config.destinationName} is available only for native ETH from Ethereum or supported L2 chains on ${intent.env}.`
     );
   }
 
-  if (intent.originChainId === SEPOLIA_CHAIN_ID) {
+  const config = getSnowbridgeConfig(intent.env);
+
+  if (intent.originChainId === config.l1ChainId) {
     return {
       steps: [
         {
           kind: "snowbridge",
           requiredWallet: "evm",
-          originChainId: SEPOLIA_CHAIN_ID,
-          destinationParaId: PASEO_ASSETHUB_PARA_ID,
+          originChainId: config.l1ChainId,
+          destinationParaId: config.assetHubParaId,
           tokenKey: "native",
           amountSource: "input",
         },
@@ -64,15 +67,15 @@ export function buildTransferPlan(intent: TransferIntent): TransferPlan {
         kind: "across",
         requiredWallet: "evm",
         originChainId: intent.originChainId,
-        destinationChainId: SEPOLIA_CHAIN_ID,
+        destinationChainId: config.l1ChainId,
         tokenKey: intent.tokenKey,
         recipientMode: "depositor",
       },
       {
         kind: "snowbridge",
         requiredWallet: "evm",
-        originChainId: SEPOLIA_CHAIN_ID,
-        destinationParaId: PASEO_ASSETHUB_PARA_ID,
+        originChainId: config.l1ChainId,
+        destinationParaId: config.assetHubParaId,
         tokenKey: "native",
         amountSource: "acrossMinOutput",
       },
