@@ -10,7 +10,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@snowbridge/api": "^0.4.3",
+    "@snowbridge/api": "0.4.2",
+    "@snowbridge/registry": "0.4.2",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "viem": "^2.45.3"

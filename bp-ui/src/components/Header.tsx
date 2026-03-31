@@ -16,7 +16,7 @@ export default function Header({ current, onNavigate }: HeaderProps) {
       <div className="msHeader__inner">
         <div className="msBrand">
           <div className="msBrand__mark" />
-          <div className="msBrand__name">Multiswap</div>
+          <div className="msBrand__name">ConnectBridge</div>
         </div>
 
         <nav className="msNav">

@@ -89,6 +89,18 @@ function buildProgressLines(plan: TransferPlan): ProgressLine[] {
     }
 
     lines.push({
+      id: `snowbridge-${i}-prepare`,
+      label: `Prepare WETH for Snowbridge (${i + 1})`,
+      status: "idle",
+    });
+
+    lines.push({
+      id: `snowbridge-${i}-approve`,
+      label: `Approve WETH for Snowbridge (${i + 1})`,
+      status: "idle",
+    });
+
+    lines.push({
       id: `snowbridge-${i}-bridge`,
       label: `${getSnowbridgeProgressLabel(step.originChainId)} (${i + 1})`,
       status: "idle",
@@ -390,6 +402,7 @@ export default function TransferPage() {
     });
 
     let snowbridgeAmountRawFromAcross: string | undefined;
+    let activeProgressLineId: string | null = null;
 
     try {
       const needsAcross = plan.steps.some((step) => step.kind === "across");
@@ -402,7 +415,9 @@ export default function TransferPage() {
           const approvalLineId = `across-${i}-approve`;
           const bridgeLineId = `across-${i}-bridge`;
 
+          activeProgressLineId = approvalLineId;
           updateProgressLine(approvalLineId, { status: "running", detail: undefined });
+          activeProgressLineId = bridgeLineId;
           updateProgressLine(bridgeLineId, { status: "running", detail: undefined });
 
           const acrossRecipient =
@@ -436,6 +451,7 @@ export default function TransferPage() {
 
           if (step.recipientMode === "depositor") {
             const waitLineId = `across-${i}-wait-fill`;
+            activeProgressLineId = waitLineId;
             updateProgressLine(waitLineId, { status: "running", hash: res.swapTxHash });
 
             const fill = await waitForDepositFill({
@@ -468,8 +484,10 @@ export default function TransferPage() {
           continue;
         }
 
+        const snowbridgePrepareLineId = `snowbridge-${i}-prepare`;
+        const snowbridgeApproveLineId = `snowbridge-${i}-approve`;
         const snowbridgeLineId = `snowbridge-${i}-bridge`;
-        updateProgressLine(snowbridgeLineId, { status: "running" });
+        activeProgressLineId = snowbridgePrepareLineId;
 
         const amountRaw =
           step.amountSource === "acrossMinOutput" ? snowbridgeAmountRawFromAcross : undefined;
@@ -483,13 +501,28 @@ export default function TransferPage() {
           recipientSubstrate: recipient.trim(),
           amountHuman: step.amountSource === "input" ? amount : undefined,
           amountRaw,
+          onProgress: (event) => {
+            const lineId =
+              event.stage === "prepare"
+                ? snowbridgePrepareLineId
+                : event.stage === "approve"
+                  ? snowbridgeApproveLineId
+                  : snowbridgeLineId;
+
+            activeProgressLineId = lineId;
+            updateProgressLine(lineId, {
+              status: event.status,
+              hash: event.hash,
+              detail: event.detail,
+            });
+          },
         });
 
         const ok = res.status === "success";
         updateProgressLine(snowbridgeLineId, {
           status: ok ? "success" : "error",
           hash: res.txHash,
-          detail: `deliveryFee=${res.deliveryFeeWei}`,
+          detail: `asset=${res.bridgeAssetSymbol}, deliveryFee=${res.deliveryFeeWei}`,
         });
 
         if (!ok) {
@@ -507,7 +540,13 @@ export default function TransferPage() {
       setProgress((prev) => ({
         ...prev,
         lines: prev.lines.map((line) =>
-          line.status === "running" ? { ...line, status: "error" } : line
+          line.status === "running" || line.id === activeProgressLineId
+            ? {
+                ...line,
+                status: "error",
+                detail: line.id === activeProgressLineId ? msg : line.detail,
+              }
+            : line
         ),
         done: false,
         error: msg,
@@ -542,7 +581,7 @@ export default function TransferPage() {
       </div>
 
       {error ? (
-        <div className="muted" style={{ marginBottom: 10 }}>
+        <div className="muted errorText" style={{ marginBottom: 10 }}>
           {error}
         </div>
       ) : null}
@@ -671,6 +710,9 @@ export default function TransferPage() {
                 </div>
 
                 <div className="muted">Wallet required: {step.requiredWallet}</div>
+                {step.kind === "snowbridge" ? (
+                  <div className="muted">ETH is wrapped to WETH on L1 before Snowbridge. Asset Hub receives WETH.</div>
+                ) : null}
               </div>
             ))}
           </div>
@@ -718,9 +760,9 @@ export default function TransferPage() {
 
             <div className="progressSummary">
               {progress.done ? <div className="muted">Completed</div> : null}
-              {progress.error ? <div className="muted">{progress.error}</div> : null}
+              {progress.error ? <div className="muted errorText">{progress.error}</div> : null}
 
-              {exec.err ? <div className="muted">{exec.err}</div> : null}
+              {exec.err && exec.err !== progress.error ? <div className="muted errorText">{exec.err}</div> : null}
               {exec.hash ? (
                 <div className="copyLine">
                   <div className="muted copyValue" title={exec.hash}>Tx: {shortenMiddle(exec.hash)}</div>

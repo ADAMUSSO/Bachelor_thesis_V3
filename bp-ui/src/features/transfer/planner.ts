@@ -40,7 +40,7 @@ export function buildTransferPlan(intent: TransferIntent): TransferPlan {
   ) {
     const config = getSnowbridgeConfig(intent.env);
     throw new Error(
-      `Snowbridge to ${config.destinationName} is available only for native ETH from Ethereum or supported L2 chains on ${intent.env}.`
+      `Snowbridge to ${config.destinationName} is available only for ETH liquidity from Ethereum or supported L2 chains on ${intent.env}. The app wraps ETH to WETH before the Snowbridge step.`
     );
   }
 

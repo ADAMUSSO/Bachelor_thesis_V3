@@ -10,8 +10,20 @@
 
 .centerStage {
   min-height: calc(100vh - 72px);
+  display: block;
+}
+
+.pageStage {
+  width: 100%;
+}
+
+.pageStage--active {
   display: grid;
   place-items: center;
+}
+
+.pageStage--hidden {
+  display: none;
 }
 
 .panel {
