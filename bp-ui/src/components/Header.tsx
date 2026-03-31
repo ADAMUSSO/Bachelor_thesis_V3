@@ -1,6 +1,6 @@
 import "./Header.css";
 
-type Page = "transfer" | "balance" | "docs";
+type Page = "transfer" | "balance" |  "swap" | "docs";
 
 type HeaderProps = {
   current: Page;
@@ -26,9 +26,13 @@ export default function Header({ current, onNavigate }: HeaderProps) {
           <button className={linkClass("balance")} onClick={() => onNavigate("balance")}>
             Balance
           </button>
+          <button className={linkClass("swap")} onClick={() => onNavigate("swap")}>
+            Swap
+          </button>
           <button className={linkClass("docs")} onClick={() => onNavigate("docs")}>
             Docs
           </button>
+          
         </nav>
       </div>
     </header>

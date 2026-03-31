@@ -3,9 +3,10 @@ import Header from "./components/Header";
 import TransferPage from "./pages/TransferPage";
 import BalancePage from "./pages/BalancePage";
 import DocsPage from "./pages/DocsPage";
+import SwapPage from "./pages/SwapPage";
 import "./App.css";
 
-type Page = "transfer" | "balance" | "docs";
+type Page = "transfer" | "balance" | "docs" | "swap";
 
 export default function App() {
   const [page, setPage] = useState<Page>("transfer");
@@ -19,6 +20,7 @@ export default function App() {
           {page === "transfer" && <TransferPage />}
           {page === "balance" && <BalancePage />}
           {page === "docs" && <DocsPage />}
+          {page === "swap" && <SwapPage />}
         </div>
       </div>
     </div>
