@@ -39,7 +39,14 @@ function txData(value: unknown): `0x${string}` {
   return value as `0x${string}`;
 }
 
-function validationError(logs: unknown): string {
+function validationError(result: {
+  logs: unknown;
+  data?: {
+    assetHubDryRunError?: unknown;
+    destinationParachainDryRunError?: unknown;
+  };
+}): string {
+  const { logs, data } = result;
   if (!Array.isArray(logs)) return "Snowbridge validation failed.";
 
   const messages = logs
@@ -52,9 +59,16 @@ function validationError(logs: unknown): string {
     })
     .filter(Boolean);
 
-  return messages.length
-    ? `Snowbridge validation failed: ${messages.join(" | ")}`
-    : "Snowbridge validation failed.";
+  const details = [data?.assetHubDryRunError, data?.destinationParachainDryRunError]
+    .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+    .filter((value, index, all) => all.indexOf(value) === index);
+
+  const parts = [
+    ...messages,
+    ...details.filter((detail) => !messages.includes(detail)),
+  ];
+
+  return parts.length ? `Snowbridge validation failed: ${parts.join(" | ")}` : "Snowbridge validation failed.";
 }
 
 function applyFeeOverrides(request: any, feeOverrides: FeeOverrides) {
@@ -131,7 +145,7 @@ export async function executeSnowbridgeToAssetHub(args: {
 
     const validation = await toPolkadotV2.validateTransfer(context, transfer);
     if (!validation.success) {
-      throw new Error(validationError(validation.logs));
+      throw new Error(validationError(validation));
     }
 
     const tx = transfer.tx as unknown as TransactionRequest;
