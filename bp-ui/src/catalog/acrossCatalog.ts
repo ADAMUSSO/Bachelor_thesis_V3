@@ -16,6 +16,17 @@ function isDefined<T>(v: T | null | undefined): v is T {
   return v !== null && v !== undefined;
 }
 
+function decimalsForSymbol(symbol: string | undefined, isNative: boolean): number {
+  if (isNative) return 18;
+
+  const normalized = (symbol ?? "").trim().toUpperCase();
+  if (normalized.includes("USDC") || normalized === "USDBC" || normalized === "USDB C") return 6;
+  if (normalized.includes("USDT")) return 6;
+  if (normalized.includes("WBTC") || normalized === "TBTC") return 8;
+
+  return 18;
+}
+
 function normalizeRoutes(json: any): AcrossRoute[] {
   const arr: any[] | null =
     Array.isArray(json) ? json :
@@ -115,7 +126,7 @@ export async function getAcrossTokensForChain(env: Env, chainId: number): Promis
         key,
         symbol: r.originTokenSymbol ?? (isNative ? "ETH" : "UNKNOWN"),
         address: isNative ? undefined : r.originToken,
-        decimals: 18,
+        decimals: decimalsForSymbol(r.originTokenSymbol, isNative),
         chainId,
         isNative,
       });

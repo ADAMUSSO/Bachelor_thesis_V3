@@ -1,7 +1,7 @@
 import { BrowserProvider, type TransactionRequest } from "ethers";
-import { Context, toPolkadotSnowbridgeV2, toPolkadotV2 } from "@snowbridge/api";
+import { assetsV2, Context, toPolkadotSnowbridgeV2 } from "@snowbridge/api";
 import { bridgeInfoFor } from "@snowbridge/registry";
-import { createPublicClient, createWalletClient, custom, http, type Address, type Hex } from "viem";
+import { createPublicClient, createWalletClient, custom, encodeFunctionData, http, type Address, type Hex } from "viem";
 import type { Env } from "../../../catalog/types";
 import { getSnowbridgeConfig } from "../../../catalog/snowbridgeCatalog";
 import { amountToRawString } from "../../../utils/amount";
@@ -12,7 +12,7 @@ import { getSafeFeeOverrides, type FeeOverrides } from "../../../evm/feeOverride
 type BigNumberishLike = bigint | number | string | { toString(): string } | null | undefined;
 type ProgressStatus = "running" | "success";
 
-const ERC20_READ_ABI = [
+const ERC20_ABI = [
   {
     type: "function",
     name: "balanceOf",
@@ -29,6 +29,16 @@ const ERC20_READ_ABI = [
       { name: "spender", type: "address" },
     ],
     outputs: [{ name: "remaining", type: "uint256" }],
+  },
+  {
+    type: "function",
+    name: "approve",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "spender", type: "address" },
+      { name: "amount", type: "uint256" },
+    ],
+    outputs: [{ name: "ok", type: "bool" }],
   },
 ] as const;
 
@@ -67,19 +77,35 @@ function txData(value: unknown): `0x${string}` {
   return value as `0x${string}`;
 }
 
-function resolveSnowbridgeWrappedEthAddress(registry: any): Address {
-  const chainAssets = registry?.ethereumChains?.[`ethereum_${registry.ethChainId}`]?.assets;
-  if (!chainAssets || typeof chainAssets !== "object") {
-    throw new Error("Snowbridge registry is missing the Ethereum asset catalog.");
+function tokenAddressFromKey(tokenKey: string): Address {
+  if (tokenKey === "native") return assetsV2.ETHER_TOKEN_ADDRESS as Address;
+
+  const value = tokenKey.startsWith("erc20:") ? tokenKey.slice("erc20:".length) : "";
+  if (!/^0x[a-fA-F0-9]{40}$/.test(value)) {
+    throw new Error("Invalid Snowbridge token.");
   }
 
-  for (const [address, asset] of Object.entries<any>(chainAssets)) {
-    if (typeof address === "string" && address.startsWith("0x") && asset?.symbol === "WETH") {
-      return address as Address;
-    }
-  }
+  return value.toLowerCase() as Address;
+}
 
-  throw new Error("Snowbridge registry does not expose Wrapped Ether for this environment.");
+function resolveBridgeAsset(args: {
+  registry: any;
+  tokenKey: string;
+}): { address: Address; symbol: string; decimals: number; isNative: boolean } {
+  const address = tokenAddressFromKey(args.tokenKey);
+  const normalized = address.toLowerCase();
+  const asset =
+    args.registry?.ethereumChains?.[`ethereum_${args.registry.ethChainId}`]?.assets?.[normalized] ??
+    args.registry?.parachains?.[`polkadot_${args.registry.assetHubParaId}`]?.assets?.[normalized];
+
+  if (!asset) throw new Error("Snowbridge registry does not support the selected token.");
+
+  return {
+    address,
+    symbol: asset.symbol || (args.tokenKey === "native" ? "ETH" : "Token"),
+    decimals: Number(asset.decimals ?? 18),
+    isNative: args.tokenKey === "native",
+  };
 }
 
 function emitProgress(
@@ -113,12 +139,7 @@ function normalizeDetail(value: unknown): string | null {
   }
 }
 
-function detailContains(value: unknown, pattern: string): boolean {
-  const normalized = normalizeDetail(value);
-  return normalized ? normalized.includes(pattern) : false;
-}
-
-function shouldBypassKnownPaseoDryRunFailure(args: {
+function isKnownPaseoDryRunOnly(args: {
   env: Env;
   validation: {
     logs?: Array<{ message?: unknown }>;
@@ -130,12 +151,13 @@ function shouldBypassKnownPaseoDryRunFailure(args: {
 }): boolean {
   if (args.env !== "testnet") return false;
 
-  const logs = Array.isArray(args.validation.logs) ? args.validation.logs : [];
-  const messages = logs
-    .map((entry) => (typeof entry?.message === "string" ? entry.message : ""))
-    .filter(Boolean);
+  const messages = Array.isArray(args.validation.logs)
+    ? args.validation.logs
+        .map((entry) => (typeof entry?.message === "string" ? entry.message : ""))
+        .filter(Boolean)
+    : [];
 
-  const hasOnlyDryRunMessages =
+  const hasOnlyDryRunErrors =
     messages.length > 0 &&
     messages.every(
       (message) =>
@@ -144,11 +166,13 @@ function shouldBypassKnownPaseoDryRunFailure(args: {
         message.includes("Transaction success cannot be confirmed.")
     );
 
-  if (!hasOnlyDryRunMessages) return false;
+  const assetHubDetail = normalizeDetail(args.validation.data?.assetHubDryRunError);
+  const parachainDetail = normalizeDetail(args.validation.data?.destinationParachainDryRunError);
 
   return (
-    detailContains(args.validation.data?.assetHubDryRunError, "UntrustedReserveLocation") &&
-    !detailContains(args.validation.data?.destinationParachainDryRunError, "UntrustedReserveLocation")
+    hasOnlyDryRunErrors &&
+    assetHubDetail?.includes("UntrustedReserveLocation") === true &&
+    parachainDetail?.includes("UntrustedReserveLocation") !== true
   );
 }
 
@@ -239,6 +263,8 @@ async function sendPreparedTransaction(args: {
 export async function executeSnowbridgeToAssetHub(args: {
   env: Env;
   recipientSubstrate: string;
+  tokenKey: string;
+  tokenDecimals?: number;
   amountHuman?: string;
   amountRaw?: string;
   onProgress?: (event: SnowbridgeProgressEvent) => void;
@@ -268,188 +294,159 @@ export async function executeSnowbridgeToAssetHub(args: {
     transport: http(rpcUrl),
   });
 
-  const amountRaw = args.amountRaw ?? amountToRawString(args.amountHuman ?? "", 18);
+  const { registry, environment } = bridgeInfoFor(config.bridgeEnv);
+  const bridgeAsset = resolveBridgeAsset({
+    registry,
+    tokenKey: args.tokenKey,
+  });
+
+  const amountRaw = args.amountRaw ?? amountToRawString(args.amountHuman ?? "", args.tokenDecimals ?? bridgeAsset.decimals);
   const amountWei = BigInt(amountRaw);
   if (amountWei <= 0n) throw new Error("Amount must be > 0 for Snowbridge transfer.");
 
-  const { registry, environment } = bridgeInfoFor(config.bridgeEnv);
   const context = new Context(environment);
 
   try {
     context.setEthProvider(config.l1ChainId, new BrowserProvider(eth));
 
-    const bridgeAssetAddress = resolveSnowbridgeWrappedEthAddress(registry);
-    const bridgeAssetSymbol = "WETH";
-    const useLegacyTestnetAssetHubFlow = args.env === "testnet";
-    const transferImpl = useLegacyTestnetAssetHubFlow
-      ? null
-      : toPolkadotSnowbridgeV2.createTransferImplementation(
-          config.assetHubParaId,
-          registry,
-          bridgeAssetAddress
-        );
-    const fee: any = useLegacyTestnetAssetHubFlow
-      ? await toPolkadotV2.getDeliveryFee(context, registry, bridgeAssetAddress, config.assetHubParaId)
-      : await transferImpl!.getDeliveryFee(context, registry, bridgeAssetAddress, config.assetHubParaId);
+    const transferImpl = toPolkadotSnowbridgeV2.createTransferImplementation(
+      config.assetHubParaId,
+      registry,
+      bridgeAsset.address
+    );
+    const fee: any = await transferImpl.getDeliveryFee(context, registry, bridgeAsset.address, config.assetHubParaId);
 
     emitProgress(args.onProgress, {
       stage: "prepare",
       status: "running",
-      detail: `Checking ${bridgeAssetSymbol} balance for Snowbridge...`,
+      detail: `Checking ${bridgeAsset.symbol} balance and Snowbridge delivery fee...`,
     });
 
-    const [ethBalance, wrappedBalance, gatewayAllowance] = await Promise.all([
-      publicClient.getBalance({ address: account }),
-      publicClient.readContract({
-        address: bridgeAssetAddress,
-        abi: ERC20_READ_ABI,
+    const ethBalance = await publicClient.getBalance({ address: account });
+
+    if (bridgeAsset.isNative) {
+      if (ethBalance < amountWei + fee.totalFeeInWei) {
+        throw new Error(
+          `Insufficient ETH to send ${bridgeAsset.symbol} and pay the Snowbridge delivery fee. Required at least ${(amountWei + fee.totalFeeInWei).toString()} wei before gas.`
+        );
+      }
+    } else {
+      if (ethBalance < fee.totalFeeInWei) {
+        throw new Error(
+          `Insufficient ETH to pay the Snowbridge delivery fee. Required at least ${fee.totalFeeInWei.toString()} wei before gas.`
+        );
+      }
+
+      const tokenBalance = (await publicClient.readContract({
+        address: bridgeAsset.address,
+        abi: ERC20_ABI,
         functionName: "balanceOf",
         args: [account],
-      }),
-      publicClient.readContract({
-        address: bridgeAssetAddress,
-        abi: ERC20_READ_ABI,
-        functionName: "allowance",
-        args: [account, txAddress(registry.gatewayAddress)],
-      }),
-    ]);
+      })) as bigint;
 
-    const wrapAmountWei = wrappedBalance >= amountWei ? 0n : amountWei - wrappedBalance;
-
-    if (ethBalance < wrapAmountWei + fee.totalFeeInWei) {
-      throw new Error(
-        `Insufficient ETH to prepare ${bridgeAssetSymbol} and pay the Snowbridge delivery fee. Required at least ${(wrapAmountWei + fee.totalFeeInWei).toString()} wei before gas.`
-      );
-    }
-
-    let wrapTxHash: Hex | undefined;
-    if (wrapAmountWei > 0n) {
-      emitProgress(args.onProgress, {
-        stage: "prepare",
-        status: "running",
-        detail: `Wrapping ETH to ${bridgeAssetSymbol} for Snowbridge...`,
-      });
-
-      const wrapTx = (await toPolkadotV2.depositWeth(
-        account,
-        bridgeAssetAddress,
-        wrapAmountWei
-      )) as unknown as TransactionRequest;
-      const { hash, receipt } = await sendPreparedTransaction({
-        walletClient,
-        publicClient,
-        account,
-        tx: wrapTx,
-      });
-
-      wrapTxHash = hash;
-      if (receipt.status !== "success") {
-        throw new Error(`${bridgeAssetSymbol} wrap transaction reverted.`);
+      if (tokenBalance < amountWei) {
+        throw new Error(
+          `Insufficient ${bridgeAsset.symbol} balance. Required ${amountWei.toString()} raw units.`
+        );
       }
-
-      emitProgress(args.onProgress, {
-        stage: "prepare",
-        status: "success",
-        hash,
-        detail: `Wrapped ETH to ${bridgeAssetSymbol}.`,
-      });
-    } else {
-      emitProgress(args.onProgress, {
-        stage: "prepare",
-        status: "success",
-        detail: `Using existing ${bridgeAssetSymbol} balance.`,
-      });
     }
+
+    emitProgress(args.onProgress, {
+      stage: "prepare",
+      status: "success",
+      detail: `Using ${bridgeAsset.symbol} for Snowbridge.`,
+    });
 
     let approvalTxHash: Hex | undefined;
-    if (gatewayAllowance < amountWei) {
-      emitProgress(args.onProgress, {
-        stage: "approve",
-        status: "running",
-        detail: `Approving ${bridgeAssetSymbol} for the Snowbridge gateway...`,
-      });
+    if (!bridgeAsset.isNative) {
+      const gatewayAddress = txAddress(registry.gatewayAddress);
+      const allowance = (await publicClient.readContract({
+        address: bridgeAsset.address,
+        abi: ERC20_ABI,
+        functionName: "allowance",
+        args: [account, gatewayAddress],
+      })) as bigint;
 
-      const approvalTx = (await toPolkadotV2.approveTokenSpend(
-        context,
-        account,
-        bridgeAssetAddress,
-        amountWei
-      )) as unknown as TransactionRequest;
-      const { hash, receipt } = await sendPreparedTransaction({
-        walletClient,
-        publicClient,
-        account,
-        tx: approvalTx,
-      });
+      if (allowance < amountWei) {
+        emitProgress(args.onProgress, {
+          stage: "approve",
+          status: "running",
+          detail: `Approving ${bridgeAsset.symbol} for the Snowbridge gateway...`,
+        });
 
-      approvalTxHash = hash;
-      if (receipt.status !== "success") {
-        throw new Error(`${bridgeAssetSymbol} approval transaction reverted.`);
+        const approvalTx = {
+          to: bridgeAsset.address,
+          data: encodeFunctionData({
+            abi: ERC20_ABI,
+            functionName: "approve",
+            args: [gatewayAddress, amountWei],
+          }),
+          value: 0n,
+        } as TransactionRequest;
+
+        const { hash, receipt } = await sendPreparedTransaction({
+          walletClient,
+          publicClient,
+          account,
+          tx: approvalTx,
+        });
+
+        approvalTxHash = hash;
+        if (receipt.status !== "success") {
+          throw new Error(`${bridgeAsset.symbol} approval transaction reverted.`);
+        }
+
+        emitProgress(args.onProgress, {
+          stage: "approve",
+          status: "success",
+          hash,
+          detail: `${bridgeAsset.symbol} approval confirmed.`,
+        });
+      } else {
+        emitProgress(args.onProgress, {
+          stage: "approve",
+          status: "success",
+          detail: `Existing ${bridgeAsset.symbol} allowance is sufficient.`,
+        });
       }
-
-      emitProgress(args.onProgress, {
-        stage: "approve",
-        status: "success",
-        hash,
-        detail: `${bridgeAssetSymbol} approval confirmed.`,
-      });
-    } else {
-      emitProgress(args.onProgress, {
-        stage: "approve",
-        status: "success",
-        detail: `Existing ${bridgeAssetSymbol} allowance is sufficient.`,
-      });
     }
 
-    const transfer: any = useLegacyTestnetAssetHubFlow
-      ? await toPolkadotV2.createTransfer(
-          registry,
-          account,
-          args.recipientSubstrate.trim(),
-          bridgeAssetAddress,
-          config.assetHubParaId,
-          amountWei,
-          fee
-        )
-      : await transferImpl!.createTransfer(
-          context,
-          registry,
-          config.assetHubParaId,
-          account,
-          args.recipientSubstrate.trim(),
-          bridgeAssetAddress,
-          amountWei,
-          fee
-        );
+    const transfer: any = await transferImpl.createTransfer(
+      context,
+      registry,
+      config.assetHubParaId,
+      account,
+      args.recipientSubstrate.trim(),
+      bridgeAsset.address,
+      amountWei,
+      fee
+    );
 
     emitProgress(args.onProgress, {
       stage: "bridge",
       status: "running",
-      detail: `Validating Snowbridge transfer with ${bridgeAssetSymbol} on Asset Hub...`,
+      detail: `Validating Snowbridge transfer with ${bridgeAsset.symbol} on Asset Hub...`,
     });
 
-    const validation: any = useLegacyTestnetAssetHubFlow
-      ? await toPolkadotV2.validateTransfer(context, transfer)
-      : await transferImpl!.validateTransfer(context, transfer);
+    const validation: any = await transferImpl.validateTransfer(context, transfer);
     if (!validation.success) {
       console.error("Snowbridge validation result:", validation);
-      if (useLegacyTestnetAssetHubFlow && shouldBypassKnownPaseoDryRunFailure({ env: args.env, validation })) {
-        emitProgress(args.onProgress, {
-          stage: "bridge",
-          status: "running",
-          detail:
-            "Paseo dry run returned a known false-negative (UntrustedReserveLocation). Submitting the legacy Snowbridge transaction anyway.",
-        });
-      } else {
+      if (!isKnownPaseoDryRunOnly({ env: args.env, validation })) {
         throw new Error(validationError(validation));
       }
+      emitProgress(args.onProgress, {
+        stage: "bridge",
+        status: "running",
+        detail:
+          "Paseo Asset Hub dry run returned a known UntrustedReserveLocation false-negative. Submitting Snowbridge transfer anyway.",
+      });
     }
 
     const tx = transfer.tx as unknown as TransactionRequest;
     emitProgress(args.onProgress, {
       stage: "bridge",
       status: "running",
-      detail: `Submitting Snowbridge transfer with ${bridgeAssetSymbol}...`,
+      detail: `Submitting Snowbridge transfer with ${bridgeAsset.symbol}...`,
     });
 
     const { hash, receipt } = await sendPreparedTransaction({
@@ -466,9 +463,8 @@ export async function executeSnowbridgeToAssetHub(args: {
       deliveryFeeWei: fee.totalFeeInWei.toString(),
       executionFeeWei: (validation.data.feeInfo?.executionFee ?? 0n).toString(),
       destinationName: config.destinationName,
-      bridgeAssetAddress,
-      bridgeAssetSymbol,
-      wrapTxHash,
+      bridgeAssetAddress: bridgeAsset.address,
+      bridgeAssetSymbol: bridgeAsset.symbol,
       approvalTxHash,
     };
   } finally {

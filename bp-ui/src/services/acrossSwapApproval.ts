@@ -26,9 +26,6 @@ export type SwapApprovalResponse = {
   id?: string;
 };
 
-
-
-
 export async function fetchSwapApproval(params: {
   env: Env;
   tradeType: "exactInput";

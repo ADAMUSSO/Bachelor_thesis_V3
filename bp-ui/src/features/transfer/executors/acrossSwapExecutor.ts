@@ -51,6 +51,12 @@ function applyFeeOverrides(request: any, feeOverrides: FeeOverrides) {
   }
 }
 
+function txValue(value: unknown, fallback = 0n): bigint {
+  return optPositiveBigInt(value) ?? fallback;
+}
+
+const NATIVE_TOKEN_ADDRESS = "0x0000000000000000000000000000000000000000";
+
 export async function executeAcrossViaSwapApi(args: {
   env: Env;
   originChainId: number;
@@ -60,6 +66,7 @@ export async function executeAcrossViaSwapApi(args: {
   recipient?: Address;
   routes: AcrossRoute[];
   tokens: Token[];
+  expectedAccount?: Address;
 }) {
   const eth = (window as any).ethereum;
   if (!eth) throw new Error("MetaMask not found");
@@ -70,6 +77,9 @@ export async function executeAcrossViaSwapApi(args: {
 
   const [account] = await walletClient.requestAddresses();
   if (!account) throw new Error("No account connected");
+  if (args.expectedAccount && account.toLowerCase() !== args.expectedAccount.toLowerCase()) {
+    throw new Error(`Across must be submitted from ${args.expectedAccount}, where Snowbridge delivered the L1 funds.`);
+  }
 
   await ensureWalletChain(eth, args.originChainId);
 
@@ -92,8 +102,9 @@ export async function executeAcrossViaSwapApi(args: {
   const amountRaw = amountToRawString(args.amountHuman, decimals);
   if (amountRaw === "0") throw new Error("Amount must be > 0");
 
-  const inputToken = route.originToken;
-  const outputToken = route.destinationToken;
+  const isNativeTransfer = args.tokenKey === "native";
+  const inputToken = isNativeTransfer ? NATIVE_TOKEN_ADDRESS : route.originToken;
+  const outputToken = isNativeTransfer ? NATIVE_TOKEN_ADDRESS : route.destinationToken;
 
   const resp = await fetchSwapApproval({
     env: args.env,
@@ -108,7 +119,7 @@ export async function executeAcrossViaSwapApi(args: {
     slippage: "auto",
   });
 
-  const approvalTx = resp.approvalTx ?? null;
+  const approvalTx = isNativeTransfer ? null : (resp.approvalTx ?? null);
   const swapTx = resp.swapTx ?? null;
 
   if (!swapTx?.to || !swapTx?.data) {
@@ -123,7 +134,7 @@ export async function executeAcrossViaSwapApi(args: {
       account: account as Address,
       to: approvalTx.to,
       data: approvalTx.data,
-      value: approvalTx.value ? BigInt(approvalTx.value) : 0n,
+      value: txValue(approvalTx.value),
       gas: optPositiveBigInt(approvalTx.gas),
     };
     applyFeeOverrides(approvalReq, approvalFeeOverrides);
@@ -139,7 +150,7 @@ export async function executeAcrossViaSwapApi(args: {
     account: account as Address,
     to: swapTx.to,
     data: swapTx.data,
-    value: swapTx.value ? BigInt(swapTx.value) : args.tokenKey === "native" ? BigInt(amountRaw) : 0n,
+    value: txValue(swapTx.value, isNativeTransfer ? BigInt(amountRaw) : 0n),
     gas: optPositiveBigInt(swapTx.gas),
   };
   applyFeeOverrides(swapReq, swapFeeOverrides);

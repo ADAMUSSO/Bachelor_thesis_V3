@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { isAddress as isSubstrateAddress } from "@polkadot/util-crypto";
+import { createPublicClient, http, type Address } from "viem";
 import {
   getAcrossChains,
   getAcrossDestinations,
@@ -8,21 +9,35 @@ import {
 } from "../catalog/acrossCatalog";
 import {
   getSnowbridgeConfig,
+  getSnowbridgeAssetHubTokens,
   getSnowbridgeDestinations,
   getSnowbridgeProgressLabel,
+  getSnowbridgeSourceDestinations,
+  getSnowbridgeTokenSymbol,
   isSnowbridgeDestination,
 } from "../catalog/snowbridgeCatalog";
 import type { Chain, Env, Token } from "../catalog/types";
 import ComboBox, { type ComboOption } from "../components/ComboBox";
 import { executeAcrossViaSwapApi } from "../features/transfer/executors/acrossSwapExecutor";
 import { executeSnowbridgeToAssetHub } from "../features/transfer/executors/snowbridgeExecutor";
+import { executeSnowbridgeFromAssetHub } from "../features/transfer/executors/snowbridgeReverseExecutor";
 import { buildTransferPlan } from "../features/transfer/planner";
 import type { TransferIntent, TransferPlan } from "../features/transfer/types";
 import { waitForDepositFill } from "../services/acrossDepositStatus";
+import { getRpcUrl } from "../evm/rpcs";
 
 type Network = Env;
 
 const isEvmAddress = (v: string) => /^0x[a-fA-F0-9]{40}$/.test(v.trim());
+const ERC20_BALANCE_ABI = [
+  {
+    type: "function",
+    name: "balanceOf",
+    stateMutability: "view",
+    inputs: [{ name: "owner", type: "address" }],
+    outputs: [{ name: "balance", type: "uint256" }],
+  },
+] as const;
 
 function isSubstrateRecipient(v: string): boolean {
   try {
@@ -62,16 +77,19 @@ const emptyProgress = (): SubmitProgress => ({
   done: false,
 });
 
-function buildProgressLines(plan: TransferPlan): ProgressLine[] {
+function buildProgressLines(plan: TransferPlan, env: Env): ProgressLine[] {
   const lines: ProgressLine[] = [];
 
   plan.steps.forEach((step, i) => {
     if (step.kind === "across") {
-      lines.push({
-        id: `across-${i}-approve`,
-        label: `Across approval (${i + 1})`,
-        status: "idle",
-      });
+      if (step.tokenKey !== "native") {
+        lines.push({
+          id: `across-${i}-approve`,
+          label: `Across approval (${i + 1})`,
+          status: "idle",
+        });
+      }
+
       lines.push({
         id: `across-${i}-bridge`,
         label: `Across bridge tx (${i + 1})`,
@@ -90,21 +108,34 @@ function buildProgressLines(plan: TransferPlan): ProgressLine[] {
 
     lines.push({
       id: `snowbridge-${i}-prepare`,
-      label: `Prepare WETH for Snowbridge (${i + 1})`,
+      label: `Prepare ${getSnowbridgeTokenSymbol(env, step.tokenKey)} for Snowbridge (${i + 1})`,
       status: "idle",
     });
 
-    lines.push({
-      id: `snowbridge-${i}-approve`,
-      label: `Approve WETH for Snowbridge (${i + 1})`,
-      status: "idle",
-    });
+    if (step.kind === "snowbridge" && step.tokenKey !== "native") {
+      lines.push({
+        id: `snowbridge-${i}-approve`,
+        label: `Snowbridge approval (${i + 1})`,
+        status: "idle",
+      });
+    }
 
     lines.push({
       id: `snowbridge-${i}-bridge`,
-      label: `${getSnowbridgeProgressLabel(step.originChainId)} (${i + 1})`,
+      label:
+        step.kind === "snowbridgeReverse"
+          ? `Snowbridge Asset Hub -> L1 (${i + 1})`
+          : `${getSnowbridgeProgressLabel(step.originChainId)} (${i + 1})`,
       status: "idle",
     });
+
+    if (step.kind === "snowbridgeReverse" && step.recipientMode === "depositor") {
+      lines.push({
+        id: `snowbridge-${i}-wait-l1`,
+        label: `Wait for Snowbridge L1 arrival (${i + 1})`,
+        status: "idle",
+      });
+    }
   });
 
   return lines;
@@ -113,6 +144,79 @@ function buildProgressLines(plan: TransferPlan): ProgressLine[] {
 function shortenMiddle(text: string, head = 10, tail = 8): string {
   if (text.length <= head + tail + 3) return text;
   return `${text.slice(0, head)}...${text.slice(-tail)}`;
+}
+
+function tokenAddressFromKey(tokenKey: string): Address | null {
+  const value = tokenKey.startsWith("erc20:") ? tokenKey.slice("erc20:".length) : "";
+  return /^0x[a-fA-F0-9]{40}$/.test(value) ? (value as Address) : null;
+}
+
+async function requestEvmAccount(): Promise<Address> {
+  const eth = (window as any).ethereum;
+  if (!eth) throw new Error("MetaMask not found");
+
+  const accounts = await eth.request({ method: "eth_requestAccounts" });
+  const account = Array.isArray(accounts) ? accounts[0] : null;
+  if (!isEvmAddress(String(account ?? ""))) throw new Error("No EVM account connected");
+
+  return account as Address;
+}
+
+async function readL1TokenBalance(args: {
+  chainId: number;
+  tokenKey: string;
+  account: Address;
+}): Promise<bigint> {
+  const rpcUrl = getRpcUrl(args.chainId);
+  const publicClient = createPublicClient({
+    chain: {
+      id: args.chainId,
+      name: `Chain ${args.chainId}`,
+      nativeCurrency: { name: "ETH", symbol: "ETH", decimals: 18 },
+      rpcUrls: { default: { http: [rpcUrl] } },
+    } as any,
+    transport: http(rpcUrl),
+  });
+
+  if (args.tokenKey === "native") {
+    return publicClient.getBalance({ address: args.account });
+  }
+
+  const tokenAddress = tokenAddressFromKey(args.tokenKey);
+  if (!tokenAddress) throw new Error("Invalid ERC20 token for L1 balance check.");
+
+  return publicClient.readContract({
+    address: tokenAddress,
+    abi: ERC20_BALANCE_ABI,
+    functionName: "balanceOf",
+    args: [args.account],
+  }) as Promise<bigint>;
+}
+
+async function waitForL1BridgeCredit(args: {
+  chainId: number;
+  tokenKey: string;
+  account: Address;
+  baseline: bigint;
+  amountRaw: string;
+  onPoll?: (detail: string) => void;
+}) {
+  const expected = args.baseline + BigInt(args.amountRaw);
+  const deadline = Date.now() + 90 * 60 * 1000;
+
+  while (Date.now() < deadline) {
+    const balance = await readL1TokenBalance({
+      chainId: args.chainId,
+      tokenKey: args.tokenKey,
+      account: args.account,
+    });
+
+    if (balance >= expected) return balance;
+    args.onPoll?.(`waiting for L1 balance ${balance.toString()} / ${expected.toString()}`);
+    await new Promise((resolve) => window.setTimeout(resolve, 30 * 1000));
+  }
+
+  throw new Error("Timed out waiting for Snowbridge funds to arrive on L1.");
 }
 
 export default function TransferPage() {
@@ -251,8 +355,12 @@ export default function TransferPage() {
         const list = await getAcrossChains(network);
         if (cancelled) return;
 
-        list.sort((a, b) => a.chainId - b.chainId);
-        setChains(list);
+        const merged = new Map<number, Chain>();
+        for (const chain of list) merged.set(chain.chainId, chain);
+        merged.set(snowbridgeConfig.destinationChain.chainId, snowbridgeConfig.destinationChain);
+
+        const sourceChains = Array.from(merged.values()).sort((a, b) => a.chainId - b.chainId);
+        setChains(sourceChains);
       } catch (e: any) {
         if (!cancelled) setError(e?.message ?? "Failed to load chains");
       } finally {
@@ -283,7 +391,9 @@ export default function TransferPage() {
 
       setLoadingTokens(true);
       try {
-        const list = await getAcrossTokensForChain(network, sourceChainId);
+        const list = isSnowbridgeDestination(sourceChainId)
+          ? getSnowbridgeAssetHubTokens(network)
+          : await getAcrossTokensForChain(network, sourceChainId);
         if (cancelled) return;
 
         list.sort((a, b) => {
@@ -321,8 +431,28 @@ export default function TransferPage() {
 
       setLoadingDestinations(true);
       try {
-        const [acrossDestinations] = await Promise.all([
+        if (isSnowbridgeDestination(sourceChainId)) {
+          const snowbridgeDestinations = getSnowbridgeSourceDestinations({
+            env: network,
+            tokenKey,
+            chains,
+            routes: await getAcrossRoutesRaw(network),
+          });
+
+          if (!cancelled) {
+            if (network === "testnet" && snowbridgeDestinations.length === 0) {
+              setError(
+                "Paseo Asset Hub -> Sepolia is currently rejected by Paseo Asset Hub dry run (UntrustedReserveLocation)."
+              );
+            }
+            setDestinations(snowbridgeDestinations.sort((a, b) => a.chainId - b.chainId));
+          }
+          return;
+        }
+
+        const [acrossDestinations, routes] = await Promise.all([
           getAcrossDestinations(network, sourceChainId, tokenKey),
+          getAcrossRoutesRaw(network),
         ]);
 
         if (cancelled) return;
@@ -331,6 +461,7 @@ export default function TransferPage() {
           env: network,
           originChainId: sourceChainId,
           tokenKey,
+          routes,
         });
 
         const merged = new Map<number, Chain>();
@@ -349,7 +480,7 @@ export default function TransferPage() {
     return () => {
       cancelled = true;
     };
-  }, [network, sourceChainId, tokenKey]);
+  }, [chains, network, sourceChainId, tokenKey]);
 
   function updateProgressLine(id: string, patch: Partial<ProgressLine>) {
     setProgress((prev) => ({
@@ -358,7 +489,7 @@ export default function TransferPage() {
     }));
   }
 
-  function onSubmitPreview() {
+  async function onSubmitPreview() {
     setError(null);
     setExec({});
     setProgress(emptyProgress());
@@ -380,7 +511,8 @@ export default function TransferPage() {
     };
 
     try {
-      const built = buildTransferPlan(intent);
+      const routes = await getAcrossRoutesRaw(network);
+      const built = buildTransferPlan(intent, { routes });
       setPlan(built);
     } catch (e: any) {
       setPlan(null);
@@ -397,12 +529,13 @@ export default function TransferPage() {
     setError(null);
     setProgress({
       started: true,
-      lines: buildProgressLines(plan),
+      lines: buildProgressLines(plan, network),
       done: false,
     });
 
     let snowbridgeAmountRawFromAcross: string | undefined;
     let activeProgressLineId: string | null = null;
+    let requiredAcrossAccount: Address | undefined;
 
     try {
       const needsAcross = plan.steps.some((step) => step.kind === "across");
@@ -414,9 +547,13 @@ export default function TransferPage() {
         if (step.kind === "across") {
           const approvalLineId = `across-${i}-approve`;
           const bridgeLineId = `across-${i}-bridge`;
+          const needsApproval = step.tokenKey !== "native";
 
-          activeProgressLineId = approvalLineId;
-          updateProgressLine(approvalLineId, { status: "running", detail: undefined });
+          if (needsApproval) {
+            activeProgressLineId = approvalLineId;
+            updateProgressLine(approvalLineId, { status: "running", detail: undefined });
+          }
+
           activeProgressLineId = bridgeLineId;
           updateProgressLine(bridgeLineId, { status: "running", detail: undefined });
 
@@ -432,12 +569,15 @@ export default function TransferPage() {
             recipient: acrossRecipient,
             routes,
             tokens,
+            expectedAccount: requiredAcrossAccount,
           });
 
-          updateProgressLine(approvalLineId, {
-            status: "success",
-            hash: res.approvalTxHash ?? undefined,
-          });
+          if (needsApproval) {
+            updateProgressLine(approvalLineId, {
+              status: "success",
+              hash: res.approvalTxHash ?? undefined,
+            });
+          }
 
           const bridgeOk = res.swapReceiptStatus === "success";
           updateProgressLine(bridgeLineId, {
@@ -487,7 +627,77 @@ export default function TransferPage() {
         const snowbridgePrepareLineId = `snowbridge-${i}-prepare`;
         const snowbridgeApproveLineId = `snowbridge-${i}-approve`;
         const snowbridgeLineId = `snowbridge-${i}-bridge`;
+        const snowbridgeWaitLineId = `snowbridge-${i}-wait-l1`;
         activeProgressLineId = snowbridgePrepareLineId;
+
+        if (step.kind === "snowbridgeReverse") {
+          const l1Recipient =
+            step.recipientMode === "depositor" ? await requestEvmAccount() : (recipient.trim() as Address);
+          const l1BalanceBefore =
+            step.recipientMode === "depositor"
+              ? await readL1TokenBalance({
+                  chainId: step.destinationChainId,
+                  tokenKey: step.tokenKey,
+                  account: l1Recipient,
+                })
+              : undefined;
+
+          const res = await executeSnowbridgeFromAssetHub({
+            env: network,
+            destinationChainId: step.destinationChainId,
+            recipientEvm: l1Recipient,
+            tokenKey: step.tokenKey,
+            tokenDecimals: selectedToken?.decimals,
+            amountHuman: amount,
+            onProgress: (event) => {
+              const lineId = event.stage === "prepare" ? snowbridgePrepareLineId : snowbridgeLineId;
+              activeProgressLineId = lineId;
+              updateProgressLine(lineId, {
+                status: event.status,
+                hash: event.hash,
+                detail: event.detail,
+              });
+            },
+          });
+
+          const ok = res.status === "success";
+          updateProgressLine(snowbridgeLineId, {
+            status: ok ? "success" : "error",
+            hash: res.txHash,
+            detail: `asset=${res.bridgeAssetSymbol}, deliveryFeeDOT=${res.deliveryFeeDot}`,
+          });
+
+          if (!ok) {
+            throw new Error("Snowbridge transaction reverted.");
+          }
+
+          setExec({ hash: res.txHash, status: res.status });
+
+          if (step.recipientMode === "depositor") {
+            requiredAcrossAccount = l1Recipient;
+            activeProgressLineId = snowbridgeWaitLineId;
+            updateProgressLine(snowbridgeWaitLineId, {
+              status: "running",
+              detail: `Waiting for ${res.bridgeAssetSymbol} on L1 account ${shortenMiddle(l1Recipient)}.`,
+            });
+
+            await waitForL1BridgeCredit({
+              chainId: step.destinationChainId,
+              tokenKey: step.tokenKey,
+              account: l1Recipient,
+              baseline: l1BalanceBefore ?? 0n,
+              amountRaw: res.amountRaw,
+              onPoll: (detail) => updateProgressLine(snowbridgeWaitLineId, { detail }),
+            });
+
+            updateProgressLine(snowbridgeWaitLineId, {
+              status: "success",
+              detail: `${res.bridgeAssetSymbol} arrived on L1.`,
+            });
+          }
+
+          continue;
+        }
 
         const amountRaw =
           step.amountSource === "acrossMinOutput" ? snowbridgeAmountRawFromAcross : undefined;
@@ -499,6 +709,8 @@ export default function TransferPage() {
         const res = await executeSnowbridgeToAssetHub({
           env: network,
           recipientSubstrate: recipient.trim(),
+          tokenKey: step.tokenKey,
+          tokenDecimals: selectedToken?.decimals,
           amountHuman: step.amountSource === "input" ? amount : undefined,
           amountRaw,
           onProgress: (event) => {
@@ -702,16 +914,20 @@ export default function TransferPage() {
                 <div className="previewStepTitle">{step.kind === "across" ? "Across" : "Snowbridge"}</div>
 
                 <div className="previewFlow">
-                  {chainNameById.get(step.originChainId) ?? step.originChainId}
+                  {step.kind === "snowbridgeReverse"
+                    ? (chainNameById.get(step.originParaId) ?? step.originParaId)
+                    : (chainNameById.get(step.originChainId) ?? step.originChainId)}
                   <span className="arrow">-&gt;</span>
                   {step.kind === "across"
                     ? (chainNameById.get(step.destinationChainId) ?? step.destinationChainId)
-                    : (chainNameById.get(step.destinationParaId) ?? step.destinationParaId)}
+                    : step.kind === "snowbridgeReverse"
+                      ? (chainNameById.get(step.destinationChainId) ?? step.destinationChainId)
+                      : (chainNameById.get(step.destinationParaId) ?? step.destinationParaId)}
                 </div>
 
                 <div className="muted">Wallet required: {step.requiredWallet}</div>
-                {step.kind === "snowbridge" ? (
-                  <div className="muted">ETH is wrapped to WETH on L1 before Snowbridge. Asset Hub receives WETH.</div>
+                {step.kind !== "across" ? (
+                  <div className="muted">{getSnowbridgeTokenSymbol(network, step.tokenKey)} is sent through Snowbridge.</div>
                 ) : null}
               </div>
             ))}
