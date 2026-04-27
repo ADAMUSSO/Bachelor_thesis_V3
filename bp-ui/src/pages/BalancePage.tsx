@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { isAddress } from "viem";
 import { isAddress as isSubstrateAddress } from "@polkadot/util-crypto";
 import { getAcrossChains } from "../catalog/acrossCatalog";
-import { POLKADOT_ASSETHUB_CHAIN, PASEO_ASSETHUB_CHAIN } from "../catalog/snowbridgeCatalog";
+import { getSnowbridgeConfigs } from "../catalog/snowbridgeCatalog";
 import type { Chain, Env } from "../catalog/types";
 import ComboBox, { type ComboOption } from "../components/ComboBox";
 import { getRpcUrl } from "../evm/rpcs";
@@ -53,7 +53,7 @@ export default function BalancePage() {
       chains.map((chain) => ({
         value: chain.id,
         label: chain.name,
-        subLabel: chain.type === "substrate" ? `Parachain ${chain.chainId}` : String(chain.chainId),
+        subLabel: chain.type === "substrate" ? "Parachain 1000" : String(chain.chainId),
       })),
     [chains]
   );
@@ -88,8 +88,8 @@ export default function BalancePage() {
           })
           .sort((a, b) => a.chainId - b.chainId);
 
-        const assetHubChain = network === "mainnet" ? POLKADOT_ASSETHUB_CHAIN : PASEO_ASSETHUB_CHAIN;
-        const nextChains = [...rpcReadyChains, assetHubChain];
+        const assetHubChains = getSnowbridgeConfigs(network).map((config) => config.destinationChain);
+        const nextChains = [...rpcReadyChains, ...assetHubChains];
 
         setChains(nextChains);
 

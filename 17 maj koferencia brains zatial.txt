@@ -5,8 +5,8 @@ napisat clanok do 17 maj
 
 AIM teraz:
 do buduceho tyzdna spisat introduction v clanku 
-dalsi backround
-dalsi related works
+dalsi backround 5.tyzden
+dalsi related works 6.tyzden
 dalsie dva opisovat dizajn(high level overview) a implementaciu
 dalsi tyzden testy a conclusion
 

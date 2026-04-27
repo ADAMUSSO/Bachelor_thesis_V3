@@ -2,7 +2,7 @@ import { ApiPromise, WsProvider } from "@polkadot/api";
 import { bridgeInfoFor } from "@snowbridge/registry";
 import { createPublicClient, erc20Abi, formatUnits, http, isAddress, type Address } from "viem";
 import { getAcrossTokensForChain } from "../catalog/acrossCatalog";
-import { POLKADOT_ASSETHUB_CHAIN, PASEO_ASSETHUB_CHAIN } from "../catalog/snowbridgeCatalog";
+import { getSnowbridgeConfig } from "../catalog/snowbridgeCatalog";
 import type { Chain, Env, Token } from "../catalog/types";
 import { getRpcUrl } from "../evm/rpcs";
 
@@ -108,12 +108,22 @@ function erc20Location(ethChainId: number, tokenAddress: string) {
   };
 }
 
-function getAssetHubChain(env: Env): Chain {
-  return env === "mainnet" ? POLKADOT_ASSETHUB_CHAIN : PASEO_ASSETHUB_CHAIN;
+function getAssetHubBridgeInfo(env: Env, chainId?: number): any {
+  return bridgeInfoFor(getSnowbridgeConfig(env, chainId).bridgeEnv);
 }
 
-function getAssetHubBridgeInfo(env: Env): any {
-  return bridgeInfoFor(env === "mainnet" ? "polkadot_mainnet" : "paseo_sepolia");
+function getAssetHubRpcUrl(config: ReturnType<typeof getSnowbridgeConfig>, bridgeInfo: any): string {
+  const env = import.meta.env as any;
+
+  if (config.bridgeEnv === "westend_sepolia") {
+    return env.VITE_RPC_ASSET_HUB_WESTEND || "wss://asset-hub-westend-rpc.n.dwellir.com";
+  }
+
+  if (config.bridgeEnv === "paseo_sepolia") {
+    return env.VITE_RPC_ASSET_HUB_PASEO || bridgeInfo.environment.parachains[String(config.assetHubParaId)];
+  }
+
+  return env.VITE_RPC_ASSET_HUB_POLKADOT || bridgeInfo.environment.parachains[String(config.assetHubParaId)];
 }
 
 async function readErc20Balance(args: {
@@ -277,13 +287,15 @@ async function readSubstrateAssetBalance(args: {
 
 async function fetchAssetHubBalances(args: {
   env: Env;
+  chain: Chain;
   walletAddress: string;
 }): Promise<AssetBalance[]> {
-  const bridgeInfo = getAssetHubBridgeInfo(args.env);
-  const assetHubChain = getAssetHubChain(args.env);
-  const parachainKey = `polkadot_${assetHubChain.chainId}`;
+  const config = getSnowbridgeConfig(args.env, args.chain.chainId);
+  const bridgeInfo = getAssetHubBridgeInfo(args.env, args.chain.chainId);
+  const assetHubChain = config.destinationChain;
+  const parachainKey = `polkadot_${config.assetHubParaId}`;
   const assetHub = bridgeInfo.registry.parachains[parachainKey];
-  const rpcUrl = bridgeInfo.environment.parachains[String(assetHubChain.chainId)];
+  const rpcUrl = getAssetHubRpcUrl(config, bridgeInfo);
 
   if (!assetHub || !rpcUrl) {
     throw new Error(`Missing Asset Hub registry configuration for ${assetHubChain.name}.`);
@@ -342,6 +354,7 @@ export async function fetchNonZeroBalances(args: {
   if (args.chain.type === "substrate") {
     return fetchAssetHubBalances({
       env: args.env,
+      chain: args.chain,
       walletAddress: args.walletAddress,
     });
   }

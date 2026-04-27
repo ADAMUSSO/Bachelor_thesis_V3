@@ -1,4 +1,5 @@
 import type { AcrossRoute, Env } from "../../catalog/types";
+import type { SnowbridgeBridgeEnv } from "../../catalog/snowbridgeCatalog";
 
 export type TransferIntent = {
   env: Env;
@@ -25,6 +26,7 @@ export type SnowbridgeTransferStep = {
 
   originChainId: number; // Ethereum mainnet or Sepolia
   destinationParaId: number; // Polkadot/Paseo Asset Hub
+  bridgeEnv: SnowbridgeBridgeEnv;
   tokenKey: string;
   amountSource: "input" | "acrossMinOutput";
 };
@@ -35,6 +37,7 @@ export type SnowbridgeReverseTransferStep = {
 
   originParaId: number; // Polkadot/Paseo Asset Hub
   destinationChainId: number; // Ethereum L1 or supported L2
+  bridgeEnv: SnowbridgeBridgeEnv;
   tokenKey: string;
   amountSource: "input";
   recipientMode: "final" | "depositor";

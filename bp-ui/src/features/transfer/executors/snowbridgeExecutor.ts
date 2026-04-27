@@ -3,7 +3,7 @@ import { assetsV2, Context, toPolkadotSnowbridgeV2 } from "@snowbridge/api";
 import { bridgeInfoFor } from "@snowbridge/registry";
 import { createPublicClient, createWalletClient, custom, encodeFunctionData, http, type Address, type Hex } from "viem";
 import type { Env } from "../../../catalog/types";
-import { getSnowbridgeConfig } from "../../../catalog/snowbridgeCatalog";
+import { getSnowbridgeConfig, type SnowbridgeBridgeEnv } from "../../../catalog/snowbridgeCatalog";
 import { amountToRawString } from "../../../utils/amount";
 import { getRpcUrl } from "../../../evm/rpcs";
 import { ensureWalletChain } from "../../../evm/ensureWalletChain";
@@ -264,12 +264,13 @@ export async function executeSnowbridgeToAssetHub(args: {
   env: Env;
   recipientSubstrate: string;
   tokenKey: string;
+  bridgeEnv?: SnowbridgeBridgeEnv;
   tokenDecimals?: number;
   amountHuman?: string;
   amountRaw?: string;
   onProgress?: (event: SnowbridgeProgressEvent) => void;
 }) {
-  const config = getSnowbridgeConfig(args.env);
+  const config = getSnowbridgeConfig(args.env, args.bridgeEnv);
 
   const eth = (window as any).ethereum;
   if (!eth) throw new Error("MetaMask not found");

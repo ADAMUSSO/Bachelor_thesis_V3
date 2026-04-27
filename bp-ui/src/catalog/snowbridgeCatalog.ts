@@ -4,14 +4,16 @@ import { bridgeInfoFor } from "@snowbridge/registry";
 export const ETHEREUM_MAINNET_CHAIN_ID = 1;
 export const SEPOLIA_CHAIN_ID = 11155111;
 export const ASSET_HUB_PARA_ID = 1000;
+export const WESTEND_ASSETHUB_CHAIN_ID = 10001000;
 
 const NATIVE_TOKEN_ADDRESS = "0x0000000000000000000000000000000000000000";
 const TESTNET_L2_DESTINATION_CHAIN_IDS = new Set<number>([84532, 11155420, 421614]);
 const MAINNET_L2_DESTINATION_CHAIN_IDS = new Set<number>([8453, 10, 42161]);
+export type SnowbridgeBridgeEnv = "polkadot_mainnet" | "paseo_sepolia" | "westend_sepolia";
 
 export type SnowbridgeRuntimeConfig = {
   env: Env;
-  bridgeEnv: "polkadot_mainnet" | "paseo_sepolia";
+  bridgeEnv: SnowbridgeBridgeEnv;
   l1ChainId: number;
   assetHubParaId: number;
   destinationChain: Chain;
@@ -32,30 +34,62 @@ export const POLKADOT_ASSETHUB_CHAIN: Chain = {
   type: "substrate",
 };
 
-export function getSnowbridgeConfig(env: Env): SnowbridgeRuntimeConfig {
-  if (env === "mainnet") {
-    return {
-      env,
-      bridgeEnv: "polkadot_mainnet",
-      l1ChainId: ETHEREUM_MAINNET_CHAIN_ID,
-      assetHubParaId: ASSET_HUB_PARA_ID,
-      destinationChain: POLKADOT_ASSETHUB_CHAIN,
-      destinationName: POLKADOT_ASSETHUB_CHAIN.name,
-    };
-  }
+export const WESTEND_ASSETHUB_CHAIN: Chain = {
+  id: "westend-assethub",
+  chainId: WESTEND_ASSETHUB_CHAIN_ID,
+  name: "Westend Asset Hub",
+  type: "substrate",
+};
 
-  return {
-    env,
+const MAINNET_SNOWBRIDGE_CONFIGS: SnowbridgeRuntimeConfig[] = [
+  {
+    env: "mainnet",
+    bridgeEnv: "polkadot_mainnet",
+    l1ChainId: ETHEREUM_MAINNET_CHAIN_ID,
+    assetHubParaId: ASSET_HUB_PARA_ID,
+    destinationChain: POLKADOT_ASSETHUB_CHAIN,
+    destinationName: POLKADOT_ASSETHUB_CHAIN.name,
+  },
+];
+
+const TESTNET_SNOWBRIDGE_CONFIGS: SnowbridgeRuntimeConfig[] = [
+  {
+    env: "testnet",
     bridgeEnv: "paseo_sepolia",
     l1ChainId: SEPOLIA_CHAIN_ID,
     assetHubParaId: ASSET_HUB_PARA_ID,
     destinationChain: PASEO_ASSETHUB_CHAIN,
     destinationName: PASEO_ASSETHUB_CHAIN.name,
-  };
+  },
+  {
+    env: "testnet",
+    bridgeEnv: "westend_sepolia",
+    l1ChainId: SEPOLIA_CHAIN_ID,
+    assetHubParaId: ASSET_HUB_PARA_ID,
+    destinationChain: WESTEND_ASSETHUB_CHAIN,
+    destinationName: WESTEND_ASSETHUB_CHAIN.name,
+  },
+];
+
+export function getSnowbridgeConfigs(env: Env): SnowbridgeRuntimeConfig[] {
+  return env === "mainnet" ? MAINNET_SNOWBRIDGE_CONFIGS : TESTNET_SNOWBRIDGE_CONFIGS;
+}
+
+export function getSnowbridgeConfig(env: Env, selector?: SnowbridgeBridgeEnv | number): SnowbridgeRuntimeConfig {
+  const configs = getSnowbridgeConfigs(env);
+  const match =
+    typeof selector === "string"
+      ? configs.find((config) => config.bridgeEnv === selector)
+      : typeof selector === "number"
+        ? configs.find((config) => config.destinationChain.chainId === selector)
+        : undefined;
+
+  return match ?? configs[0];
 }
 
 export function isSnowbridgeDestination(chainId: number): boolean {
-  return chainId === ASSET_HUB_PARA_ID;
+  return getSnowbridgeConfigs("mainnet").some((config) => config.destinationChain.chainId === chainId) ||
+    getSnowbridgeConfigs("testnet").some((config) => config.destinationChain.chainId === chainId);
 }
 
 function tokenAddressFromKey(tokenKey: string): string | null {
@@ -78,11 +112,11 @@ function routeMatchesToken(route: AcrossRoute, tokenKey: string): boolean {
   return !!tokenAddress && !route.isNative && route.originToken.toLowerCase() === tokenAddress;
 }
 
-export function isSnowbridgeTokenSupported(env: Env, tokenKey: string): boolean {
+export function isSnowbridgeTokenSupported(env: Env, tokenKey: string, bridgeEnv?: SnowbridgeBridgeEnv): boolean {
   const tokenAddress = tokenAddressFromKey(tokenKey);
   if (!tokenAddress) return false;
 
-  const config = getSnowbridgeConfig(env);
+  const config = getSnowbridgeConfig(env, bridgeEnv);
   const { registry } = bridgeInfoFor(config.bridgeEnv);
   const ethAssets = registry.ethereumChains[`ethereum_${registry.ethChainId}`]?.assets;
   const assetHubAssets = registry.parachains[`polkadot_${registry.assetHubParaId}`]?.assets;
@@ -90,11 +124,11 @@ export function isSnowbridgeTokenSupported(env: Env, tokenKey: string): boolean 
   return !!ethAssets?.[tokenAddress] && !!assetHubAssets?.[tokenAddress];
 }
 
-export function getSnowbridgeTokenSymbol(env: Env, tokenKey: string): string {
+export function getSnowbridgeTokenSymbol(env: Env, tokenKey: string, bridgeEnv?: SnowbridgeBridgeEnv): string {
   const tokenAddress = tokenAddressFromKey(tokenKey);
   if (!tokenAddress) return "Token";
 
-  const config = getSnowbridgeConfig(env);
+  const config = getSnowbridgeConfig(env, bridgeEnv);
   const { registry } = bridgeInfoFor(config.bridgeEnv);
   const asset =
     registry.ethereumChains[`ethereum_${registry.ethChainId}`]?.assets[tokenAddress] ??
@@ -106,13 +140,14 @@ export function getSnowbridgeTokenSymbol(env: Env, tokenKey: string): string {
 export function resolveSnowbridgeTokenForTransfer(params: {
   env: Env;
   originChainId: number;
+  destinationChainId?: number;
   tokenKey: string;
   routes?: AcrossRoute[];
 }): string | null {
-  const config = getSnowbridgeConfig(params.env);
+  const config = getSnowbridgeConfig(params.env, params.destinationChainId);
 
   if (params.originChainId === config.l1ChainId) {
-    return isSnowbridgeTokenSupported(params.env, params.tokenKey) ? params.tokenKey : null;
+    return isSnowbridgeTokenSupported(params.env, params.tokenKey, config.bridgeEnv) ? params.tokenKey : null;
   }
 
   for (const route of params.routes ?? []) {
@@ -121,7 +156,7 @@ export function resolveSnowbridgeTokenForTransfer(params: {
     if (!routeMatchesToken(route, params.tokenKey)) continue;
 
     const l1TokenKey = tokenKeyFromRouteDestination(route);
-    if (isSnowbridgeTokenSupported(params.env, l1TokenKey)) return l1TokenKey;
+    if (isSnowbridgeTokenSupported(params.env, l1TokenKey, config.bridgeEnv)) return l1TokenKey;
   }
 
   return null;
@@ -130,14 +165,15 @@ export function resolveSnowbridgeTokenForTransfer(params: {
 export function supportsSnowbridgeDestination(params: {
   env: Env;
   originChainId: number;
+  destinationChainId?: number;
   tokenKey: string;
   routes?: AcrossRoute[];
 }): boolean {
   return resolveSnowbridgeTokenForTransfer(params) !== null;
 }
 
-export function getSnowbridgeAssetHubTokens(env: Env): Token[] {
-  const config = getSnowbridgeConfig(env);
+export function getSnowbridgeAssetHubTokens(env: Env, assetHubChainId?: number): Token[] {
+  const config = getSnowbridgeConfig(env, assetHubChainId);
   const { registry } = bridgeInfoFor(config.bridgeEnv);
   const ethAssets = registry.ethereumChains[`ethereum_${registry.ethChainId}`]?.assets ?? {};
   const assetHubAssets = registry.parachains[`polkadot_${registry.assetHubParaId}`]?.assets ?? {};
@@ -164,12 +200,14 @@ export function supportsSnowbridgeSource(params: {
   env: Env;
   destinationChainId: number;
   tokenKey: string;
+  sourceChainId?: number;
+  bridgeEnv?: SnowbridgeBridgeEnv;
 }): boolean {
-  const config = getSnowbridgeConfig(params.env);
+  const config = getSnowbridgeConfig(params.env, params.bridgeEnv ?? params.sourceChainId);
   return (
-    params.env !== "testnet" &&
     params.destinationChainId === config.l1ChainId &&
-    isSnowbridgeTokenSupported(params.env, params.tokenKey)
+    (params.env !== "testnet" || config.bridgeEnv === "westend_sepolia") &&
+    isSnowbridgeTokenSupported(params.env, params.tokenKey, config.bridgeEnv)
   );
 }
 
@@ -177,13 +215,16 @@ export function supportsSnowbridgeSourceDestination(params: {
   env: Env;
   destinationChainId: number;
   tokenKey: string;
+  sourceChainId?: number;
+  bridgeEnv?: SnowbridgeBridgeEnv;
   routes?: AcrossRoute[];
 }): boolean {
-  const config = getSnowbridgeConfig(params.env);
+  const config = getSnowbridgeConfig(params.env, params.bridgeEnv ?? params.sourceChainId);
   const supportsL1 = supportsSnowbridgeSource({
     env: params.env,
     destinationChainId: config.l1ChainId,
     tokenKey: params.tokenKey,
+    bridgeEnv: config.bridgeEnv,
   });
 
   if (!supportsL1) return false;
@@ -199,11 +240,12 @@ export function supportsSnowbridgeSourceDestination(params: {
 
 export function getSnowbridgeSourceDestinations(params: {
   env: Env;
+  sourceChainId: number;
   tokenKey: string;
   chains: Chain[];
   routes?: AcrossRoute[];
 }): Chain[] {
-  const config = getSnowbridgeConfig(params.env);
+  const config = getSnowbridgeConfig(params.env, params.sourceChainId);
   const destinations = new Map<number, Chain>();
   const l2Destinations = params.env === "mainnet" ? MAINNET_L2_DESTINATION_CHAIN_IDS : TESTNET_L2_DESTINATION_CHAIN_IDS;
 
@@ -215,6 +257,7 @@ export function getSnowbridgeSourceDestinations(params: {
         env: params.env,
         destinationChainId: chain.chainId,
         tokenKey: params.tokenKey,
+        bridgeEnv: config.bridgeEnv,
         routes: params.routes,
       })
     ) {
@@ -231,15 +274,23 @@ export function getSnowbridgeDestinations(params: {
   tokenKey: string;
   routes?: AcrossRoute[];
 }): Chain[] {
-  return supportsSnowbridgeDestination(params) ? [getSnowbridgeConfig(params.env).destinationChain] : [];
+  return getSnowbridgeConfigs(params.env)
+    .filter((config) =>
+      supportsSnowbridgeDestination({
+        ...params,
+        destinationChainId: config.destinationChain.chainId,
+      })
+    )
+    .map((config) => config.destinationChain);
 }
 
-export function getSnowbridgeProgressLabel(originChainId: number): string {
+export function getSnowbridgeProgressLabel(originChainId: number, bridgeEnv?: SnowbridgeBridgeEnv): string {
   if (originChainId === ETHEREUM_MAINNET_CHAIN_ID) {
     return "Snowbridge Ethereum -> Polkadot Asset Hub";
   }
 
   if (originChainId === SEPOLIA_CHAIN_ID) {
+    if (bridgeEnv === "westend_sepolia") return "Snowbridge Sepolia -> Westend Asset Hub";
     return "Snowbridge Sepolia -> Paseo Asset Hub";
   }
 

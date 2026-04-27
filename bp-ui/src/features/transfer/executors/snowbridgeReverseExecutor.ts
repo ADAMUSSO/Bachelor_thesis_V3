@@ -2,7 +2,7 @@ import { assetsV2, Context, toEthereumSnowbridgeV2 } from "@snowbridge/api";
 import { bridgeInfoFor } from "@snowbridge/registry";
 import { cryptoWaitReady } from "@polkadot/util-crypto";
 import type { Env } from "../../../catalog/types";
-import { getSnowbridgeConfig } from "../../../catalog/snowbridgeCatalog";
+import { getSnowbridgeConfig, type SnowbridgeBridgeEnv } from "../../../catalog/snowbridgeCatalog";
 import { amountToRawString } from "../../../utils/amount";
 
 type ProgressStatus = "running" | "success";
@@ -93,13 +93,14 @@ async function getSubstrateSigner() {
 export async function executeSnowbridgeFromAssetHub(args: {
   env: Env;
   destinationChainId: number;
+  bridgeEnv?: SnowbridgeBridgeEnv;
   recipientEvm: string;
   tokenKey: string;
   tokenDecimals?: number;
   amountHuman: string;
   onProgress?: (event: SnowbridgeReverseProgressEvent) => void;
 }) {
-  const config = getSnowbridgeConfig(args.env);
+  const config = getSnowbridgeConfig(args.env, args.bridgeEnv);
   const tokenAddress = tokenAddressFromKey(args.tokenKey);
   const { registry, environment } = bridgeInfoFor(config.bridgeEnv);
   const asset =

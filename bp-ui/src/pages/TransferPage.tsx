@@ -8,7 +8,7 @@ import {
   getAcrossTokensForChain,
 } from "../catalog/acrossCatalog";
 import {
-  getSnowbridgeConfig,
+  getSnowbridgeConfigs,
   getSnowbridgeAssetHubTokens,
   getSnowbridgeDestinations,
   getSnowbridgeProgressLabel,
@@ -108,7 +108,7 @@ function buildProgressLines(plan: TransferPlan, env: Env): ProgressLine[] {
 
     lines.push({
       id: `snowbridge-${i}-prepare`,
-      label: `Prepare ${getSnowbridgeTokenSymbol(env, step.tokenKey)} for Snowbridge (${i + 1})`,
+      label: `Prepare ${getSnowbridgeTokenSymbol(env, step.tokenKey, step.bridgeEnv)} for Snowbridge (${i + 1})`,
       status: "idle",
     });
 
@@ -125,7 +125,7 @@ function buildProgressLines(plan: TransferPlan, env: Env): ProgressLine[] {
       label:
         step.kind === "snowbridgeReverse"
           ? `Snowbridge Asset Hub -> L1 (${i + 1})`
-          : `${getSnowbridgeProgressLabel(step.originChainId)} (${i + 1})`,
+          : `${getSnowbridgeProgressLabel(step.originChainId, step.bridgeEnv)} (${i + 1})`,
       status: "idle",
     });
 
@@ -248,7 +248,12 @@ export default function TransferPage() {
   const [progress, setProgress] = useState<SubmitProgress>(emptyProgress());
 
   const chainOptions: ComboOption<number>[] = useMemo(
-    () => chains.map((c) => ({ value: c.chainId, label: c.name, subLabel: String(c.chainId) })),
+    () =>
+      chains.map((c) => ({
+        value: c.chainId,
+        label: c.name,
+        subLabel: c.type === "substrate" ? "Parachain 1000" : String(c.chainId),
+      })),
     [chains]
   );
 
@@ -268,12 +273,16 @@ export default function TransferPage() {
 
   const destinationOptions: ComboOption<number>[] = useMemo(
     () =>
-      destinations.map((c) => ({ value: c.chainId, label: c.name, subLabel: String(c.chainId) })),
+      destinations.map((c) => ({
+        value: c.chainId,
+        label: c.name,
+        subLabel: c.type === "substrate" ? "Parachain 1000" : String(c.chainId),
+      })),
     [destinations]
   );
 
   const selectedToken = useMemo(() => tokens.find((t) => t.key === tokenKey) ?? null, [tokens, tokenKey]);
-  const snowbridgeConfig = useMemo(() => getSnowbridgeConfig(network), [network]);
+  const snowbridgeConfigs = useMemo(() => getSnowbridgeConfigs(network), [network]);
 
   const recipientIsSubstrate = useMemo(
     () => destinationChainId != null && isSnowbridgeDestination(destinationChainId),
@@ -300,9 +309,12 @@ export default function TransferPage() {
     const m = new Map<number, string>();
     for (const c of chains) m.set(c.chainId, c.name);
     for (const c of destinations) m.set(c.chainId, c.name);
-    m.set(snowbridgeConfig.destinationChain.chainId, snowbridgeConfig.destinationChain.name);
+    for (const config of snowbridgeConfigs) {
+      m.set(config.destinationChain.chainId, config.destinationChain.name);
+      m.set(config.assetHubParaId, config.destinationChain.name);
+    }
     return m;
-  }, [chains, destinations, snowbridgeConfig]);
+  }, [chains, destinations, snowbridgeConfigs]);
 
   const recipientLabel = recipientIsSubstrate ? "Recipient (Substrate SS58)" : "Recipient (EVM)";
 
@@ -357,7 +369,9 @@ export default function TransferPage() {
 
         const merged = new Map<number, Chain>();
         for (const chain of list) merged.set(chain.chainId, chain);
-        merged.set(snowbridgeConfig.destinationChain.chainId, snowbridgeConfig.destinationChain);
+        for (const config of snowbridgeConfigs) {
+          merged.set(config.destinationChain.chainId, config.destinationChain);
+        }
 
         const sourceChains = Array.from(merged.values()).sort((a, b) => a.chainId - b.chainId);
         setChains(sourceChains);
@@ -372,7 +386,7 @@ export default function TransferPage() {
     return () => {
       cancelled = true;
     };
-  }, [network]);
+  }, [network, snowbridgeConfigs]);
 
   useEffect(() => {
     let cancelled = false;
@@ -392,7 +406,7 @@ export default function TransferPage() {
       setLoadingTokens(true);
       try {
         const list = isSnowbridgeDestination(sourceChainId)
-          ? getSnowbridgeAssetHubTokens(network)
+          ? getSnowbridgeAssetHubTokens(network, sourceChainId)
           : await getAcrossTokensForChain(network, sourceChainId);
         if (cancelled) return;
 
@@ -434,6 +448,7 @@ export default function TransferPage() {
         if (isSnowbridgeDestination(sourceChainId)) {
           const snowbridgeDestinations = getSnowbridgeSourceDestinations({
             env: network,
+            sourceChainId,
             tokenKey,
             chains,
             routes: await getAcrossRoutesRaw(network),
@@ -442,7 +457,7 @@ export default function TransferPage() {
           if (!cancelled) {
             if (network === "testnet" && snowbridgeDestinations.length === 0) {
               setError(
-                "Paseo Asset Hub -> Sepolia is currently rejected by Paseo Asset Hub dry run (UntrustedReserveLocation)."
+                "This Asset Hub source currently has no supported Snowbridge destination for the selected token."
               );
             }
             setDestinations(snowbridgeDestinations.sort((a, b) => a.chainId - b.chainId));
@@ -645,6 +660,7 @@ export default function TransferPage() {
           const res = await executeSnowbridgeFromAssetHub({
             env: network,
             destinationChainId: step.destinationChainId,
+            bridgeEnv: step.bridgeEnv,
             recipientEvm: l1Recipient,
             tokenKey: step.tokenKey,
             tokenDecimals: selectedToken?.decimals,
@@ -710,6 +726,7 @@ export default function TransferPage() {
           env: network,
           recipientSubstrate: recipient.trim(),
           tokenKey: step.tokenKey,
+          bridgeEnv: step.bridgeEnv,
           tokenDecimals: selectedToken?.decimals,
           amountHuman: step.amountSource === "input" ? amount : undefined,
           amountRaw,
@@ -915,19 +932,23 @@ export default function TransferPage() {
 
                 <div className="previewFlow">
                   {step.kind === "snowbridgeReverse"
-                    ? (chainNameById.get(step.originParaId) ?? step.originParaId)
+                    ? (snowbridgeConfigs.find((config) => config.bridgeEnv === step.bridgeEnv)?.destinationName ??
+                      chainNameById.get(step.originParaId) ??
+                      step.originParaId)
                     : (chainNameById.get(step.originChainId) ?? step.originChainId)}
                   <span className="arrow">-&gt;</span>
                   {step.kind === "across"
                     ? (chainNameById.get(step.destinationChainId) ?? step.destinationChainId)
                     : step.kind === "snowbridgeReverse"
                       ? (chainNameById.get(step.destinationChainId) ?? step.destinationChainId)
-                      : (chainNameById.get(step.destinationParaId) ?? step.destinationParaId)}
+                      : (snowbridgeConfigs.find((config) => config.bridgeEnv === step.bridgeEnv)?.destinationName ??
+                        chainNameById.get(step.destinationParaId) ??
+                        step.destinationParaId)}
                 </div>
 
                 <div className="muted">Wallet required: {step.requiredWallet}</div>
                 {step.kind !== "across" ? (
-                  <div className="muted">{getSnowbridgeTokenSymbol(network, step.tokenKey)} is sent through Snowbridge.</div>
+                  <div className="muted">{getSnowbridgeTokenSymbol(network, step.tokenKey, step.bridgeEnv)} is sent through Snowbridge.</div>
                 ) : null}
               </div>
             ))}

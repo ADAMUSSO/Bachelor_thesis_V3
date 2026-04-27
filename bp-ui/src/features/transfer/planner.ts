@@ -25,14 +25,15 @@ export function buildTransferPlan(intent: TransferIntent, context: TransferPlanC
   const sourceIsAssetHub = isSnowbridgeDestination(intent.originChainId);
 
   if (sourceIsAssetHub) {
-    const config = getSnowbridgeConfig(intent.env);
+    const config = getSnowbridgeConfig(intent.env, intent.originChainId);
     if (!supportsSnowbridgeSource({
       env: intent.env,
       destinationChainId: config.l1ChainId,
       tokenKey: intent.tokenKey,
+      bridgeEnv: config.bridgeEnv,
     })) {
       throw new Error(
-        intent.env === "testnet"
+        intent.env === "testnet" && config.bridgeEnv === "paseo_sepolia"
           ? "Paseo Asset Hub -> Sepolia is currently rejected by Paseo Asset Hub dry run (UntrustedReserveLocation)."
           : `Snowbridge from ${config.destinationName} does not support this token on ${intent.env}.`
       );
@@ -42,6 +43,7 @@ export function buildTransferPlan(intent: TransferIntent, context: TransferPlanC
       env: intent.env,
       destinationChainId: intent.destinationChainId,
       tokenKey: intent.tokenKey,
+      bridgeEnv: config.bridgeEnv,
       routes: context.routes,
     })) {
       throw new Error(`Asset Hub -> L2 needs an Across route from L1 for this token/destination.`);
@@ -55,6 +57,7 @@ export function buildTransferPlan(intent: TransferIntent, context: TransferPlanC
             requiredWallet: "substrate",
             originParaId: config.assetHubParaId,
             destinationChainId: config.l1ChainId,
+            bridgeEnv: config.bridgeEnv,
             tokenKey: intent.tokenKey,
             amountSource: "input",
             recipientMode: "final",
@@ -70,6 +73,7 @@ export function buildTransferPlan(intent: TransferIntent, context: TransferPlanC
           requiredWallet: "substrate",
           originParaId: config.assetHubParaId,
           destinationChainId: config.l1ChainId,
+          bridgeEnv: config.bridgeEnv,
           tokenKey: intent.tokenKey,
           amountSource: "input",
           recipientMode: "depositor",
@@ -105,20 +109,22 @@ export function buildTransferPlan(intent: TransferIntent, context: TransferPlanC
     !supportsSnowbridgeDestination({
       env: intent.env,
       originChainId: intent.originChainId,
+      destinationChainId: intent.destinationChainId,
       tokenKey: intent.tokenKey,
       routes: context.routes,
     })
   ) {
-    const config = getSnowbridgeConfig(intent.env);
+    const config = getSnowbridgeConfig(intent.env, intent.destinationChainId);
     throw new Error(
       `Snowbridge to ${config.destinationName} does not support this token/route on ${intent.env}.`
     );
   }
 
-  const config = getSnowbridgeConfig(intent.env);
+  const config = getSnowbridgeConfig(intent.env, intent.destinationChainId);
   const snowbridgeTokenKey = resolveSnowbridgeTokenForTransfer({
     env: intent.env,
     originChainId: intent.originChainId,
+    destinationChainId: intent.destinationChainId,
     tokenKey: intent.tokenKey,
     routes: context.routes,
   });
@@ -135,6 +141,7 @@ export function buildTransferPlan(intent: TransferIntent, context: TransferPlanC
           requiredWallet: "evm",
           originChainId: config.l1ChainId,
           destinationParaId: config.assetHubParaId,
+          bridgeEnv: config.bridgeEnv,
           tokenKey: snowbridgeTokenKey,
           amountSource: "input",
         },
@@ -157,6 +164,7 @@ export function buildTransferPlan(intent: TransferIntent, context: TransferPlanC
         requiredWallet: "evm",
         originChainId: config.l1ChainId,
         destinationParaId: config.assetHubParaId,
+        bridgeEnv: config.bridgeEnv,
         tokenKey: snowbridgeTokenKey,
         amountSource: "acrossMinOutput",
       },
