@@ -7,8 +7,6 @@ export const ASSET_HUB_PARA_ID = 1000;
 export const WESTEND_ASSETHUB_CHAIN_ID = 10001000;
 
 const NATIVE_TOKEN_ADDRESS = "0x0000000000000000000000000000000000000000";
-const TESTNET_L2_DESTINATION_CHAIN_IDS = new Set<number>([84532, 11155420, 421614]);
-const MAINNET_L2_DESTINATION_CHAIN_IDS = new Set<number>([8453, 10, 42161]);
 export type SnowbridgeBridgeEnv = "polkadot_mainnet" | "paseo_sepolia" | "westend_sepolia";
 
 export type SnowbridgeRuntimeConfig = {
@@ -206,7 +204,6 @@ export function supportsSnowbridgeSource(params: {
   const config = getSnowbridgeConfig(params.env, params.bridgeEnv ?? params.sourceChainId);
   return (
     params.destinationChainId === config.l1ChainId &&
-    (params.env !== "testnet" || config.bridgeEnv === "westend_sepolia") &&
     isSnowbridgeTokenSupported(params.env, params.tokenKey, config.bridgeEnv)
   );
 }
@@ -247,11 +244,9 @@ export function getSnowbridgeSourceDestinations(params: {
 }): Chain[] {
   const config = getSnowbridgeConfig(params.env, params.sourceChainId);
   const destinations = new Map<number, Chain>();
-  const l2Destinations = params.env === "mainnet" ? MAINNET_L2_DESTINATION_CHAIN_IDS : TESTNET_L2_DESTINATION_CHAIN_IDS;
 
   for (const chain of params.chains) {
     if (chain.chainId === config.assetHubParaId) continue;
-    if (chain.chainId !== config.l1ChainId && !l2Destinations.has(chain.chainId)) continue;
     if (
       supportsSnowbridgeSourceDestination({
         env: params.env,

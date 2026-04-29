@@ -72,6 +72,23 @@ function validationError(result: { logs: unknown; data?: Record<string, unknown>
   return lines.join("\n");
 }
 
+function applyRuntimeRpcOverrides(environment: any, bridgeEnv?: SnowbridgeBridgeEnv): any {
+  const env = import.meta.env as any;
+  const parachains = { ...(environment.parachains ?? {}) };
+
+  if (bridgeEnv === "westend_sepolia" && env.VITE_RPC_ASSET_HUB_WESTEND) {
+    parachains[String(environment.assetHubParaId)] = env.VITE_RPC_ASSET_HUB_WESTEND;
+  }
+  if (bridgeEnv === "paseo_sepolia" && env.VITE_RPC_ASSET_HUB_PASEO) {
+    parachains[String(environment.assetHubParaId)] = env.VITE_RPC_ASSET_HUB_PASEO;
+  }
+
+  return {
+    ...environment,
+    parachains,
+  };
+}
+
 async function getSubstrateSigner() {
   await cryptoWaitReady();
 
@@ -122,7 +139,7 @@ export async function executeSnowbridgeFromAssetHub(args: {
   });
 
   const { address: sourceAddress, signer } = await getSubstrateSigner();
-  const context = new Context(environment);
+  const context = new Context(applyRuntimeRpcOverrides(environment, config.bridgeEnv));
 
   try {
     if (args.destinationChainId !== config.l1ChainId) {
@@ -175,7 +192,10 @@ export async function executeSnowbridgeFromAssetHub(args: {
       detail: `Submitting ${symbol} transfer from ${config.destinationName}...`,
     });
 
-    const receipt = await toEthereumSnowbridgeV2.signAndSend(context, transfer, sourceAddress, { signer });
+    const receipt = await toEthereumSnowbridgeV2.signAndSend(context, transfer, sourceAddress, {
+      signer,
+      withSignedTransaction: true,
+    });
 
     return {
       txHash: receipt.txHash,

@@ -33,9 +33,7 @@ export function buildTransferPlan(intent: TransferIntent, context: TransferPlanC
       bridgeEnv: config.bridgeEnv,
     })) {
       throw new Error(
-        intent.env === "testnet" && config.bridgeEnv === "paseo_sepolia"
-          ? "Paseo Asset Hub -> Sepolia is currently rejected by Paseo Asset Hub dry run (UntrustedReserveLocation)."
-          : `Snowbridge from ${config.destinationName} does not support this token on ${intent.env}.`
+        `Snowbridge from ${config.destinationName} does not support this token on ${intent.env}.`
       );
     }
 
