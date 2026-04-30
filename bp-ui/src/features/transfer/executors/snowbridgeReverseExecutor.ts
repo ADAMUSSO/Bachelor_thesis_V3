@@ -192,16 +192,19 @@ export async function executeSnowbridgeFromAssetHub(args: {
       detail: `Submitting ${symbol} transfer from ${config.destinationName}...`,
     });
 
+    const sourceConfirmationStartedAt = performance.now();
     const receipt = await toEthereumSnowbridgeV2.signAndSend(context, transfer, sourceAddress, {
       signer,
       withSignedTransaction: true,
     });
+    const sourceConfirmationMs = Math.round(performance.now() - sourceConfirmationStartedAt);
 
     return {
       txHash: receipt.txHash,
       status: receipt.success ? "success" : "reverted",
       amountRaw,
       deliveryFeeDot: fee.totalFeeInDot?.toString?.() ?? "",
+      sourceConfirmationMs,
       bridgeAssetAddress: tokenAddress,
       bridgeAssetSymbol: symbol,
       sourceAddress,

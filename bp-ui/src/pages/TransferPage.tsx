@@ -8,6 +8,7 @@ import {
   getAcrossTokensForChain,
 } from "../catalog/acrossCatalog";
 import {
+  getSnowbridgeConfig,
   getSnowbridgeConfigs,
   getSnowbridgeAssetHubTokens,
   getSnowbridgeDestinations,
@@ -15,6 +16,7 @@ import {
   getSnowbridgeSourceDestinations,
   getSnowbridgeTokenSymbol,
   isSnowbridgeDestination,
+  type SnowbridgeBridgeEnv,
 } from "../catalog/snowbridgeCatalog";
 import type { Chain, Env, Token } from "../catalog/types";
 import ComboBox, { type ComboOption } from "../components/ComboBox";
@@ -24,11 +26,13 @@ import { executeSnowbridgeFromAssetHub } from "../features/transfer/executors/sn
 import { buildTransferPlan } from "../features/transfer/planner";
 import type { TransferIntent, TransferPlan } from "../features/transfer/types";
 import { waitForDepositFill } from "../services/acrossDepositStatus";
+import { fetchNonZeroBalances } from "../services/balanceLookup";
 import { getRpcUrl } from "../evm/rpcs";
 
 type Network = Env;
 
 const isEvmAddress = (v: string) => /^0x[a-fA-F0-9]{40}$/.test(v.trim());
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 const ERC20_BALANCE_ABI = [
   {
     type: "function",
@@ -62,6 +66,22 @@ type SubmitProgress = {
   lines: ProgressLine[];
   done: boolean;
   error?: string;
+};
+
+type MetricFee = {
+  label: string;
+  amount: string;
+  unit: string;
+};
+
+type TransferMetrics = {
+  endToEndMs: number;
+  sourceConfirmationMs: number | null;
+  destinationReceivedMs: number | null;
+  successRate: string;
+  totalFee: string;
+  fees: MetricFee[];
+  note?: string;
 };
 
 function StepBadge({ status }: { status: StepStatus }) {
@@ -99,7 +119,7 @@ function buildProgressLines(plan: TransferPlan, env: Env): ProgressLine[] {
       if (step.recipientMode === "depositor") {
         lines.push({
           id: `across-${i}-wait-fill`,
-          label: `Across fill on Sepolia (${i + 1})`,
+          label: `Across fill for next step (${i + 1})`,
           status: "idle",
         });
       }
@@ -129,10 +149,18 @@ function buildProgressLines(plan: TransferPlan, env: Env): ProgressLine[] {
       status: "idle",
     });
 
-    if (step.kind === "snowbridgeReverse" && step.recipientMode === "depositor") {
+    if (step.kind === "snowbridgeReverse") {
       lines.push({
         id: `snowbridge-${i}-wait-l1`,
         label: `Wait for Snowbridge L1 arrival (${i + 1})`,
+        status: "idle",
+      });
+    }
+
+    if (step.kind === "snowbridge") {
+      lines.push({
+        id: `snowbridge-${i}-wait-destination`,
+        label: `Wait for Asset Hub arrival (${i + 1})`,
         status: "idle",
       });
     }
@@ -146,9 +174,55 @@ function shortenMiddle(text: string, head = 10, tail = 8): string {
   return `${text.slice(0, head)}...${text.slice(-tail)}`;
 }
 
-function tokenAddressFromKey(tokenKey: string): Address | null {
+function tokenAddressFromKey(tokenKey: string, includeNative = false): Address | null {
+  if (tokenKey === "native") return includeNative ? (ZERO_ADDRESS as Address) : null;
+
   const value = tokenKey.startsWith("erc20:") ? tokenKey.slice("erc20:".length) : "";
   return /^0x[a-fA-F0-9]{40}$/.test(value) ? (value as Address) : null;
+}
+
+function formatDuration(ms: number | null): string {
+  if (ms === null) return "not tracked";
+  if (ms < 1000) return `${ms} ms`;
+
+  const seconds = ms / 1000;
+  if (seconds < 60) return `${seconds.toFixed(2)} s`;
+
+  const minutes = Math.floor(seconds / 60);
+  const rest = Math.round(seconds % 60);
+  return `${minutes}m ${rest}s`;
+}
+
+function addFee(fees: MetricFee[], label: string, amount: string | undefined, unit: string) {
+  if (!amount || amount === "0") return;
+  fees.push({ label, amount, unit });
+}
+
+function positiveRawDiff(a: string | undefined, b: string | undefined): string | undefined {
+  if (!a || !b || !/^\d+$/.test(a) || !/^\d+$/.test(b)) return undefined;
+
+  const diff = BigInt(a) - BigInt(b);
+  return diff > 0n ? diff.toString() : undefined;
+}
+
+function totalFeeText(fees: MetricFee[]): string {
+  if (fees.length === 0) return "not available";
+
+  const totals = new Map<string, bigint>();
+  const loose: string[] = [];
+
+  for (const fee of fees) {
+    if (/^\d+$/.test(fee.amount)) {
+      totals.set(fee.unit, (totals.get(fee.unit) ?? 0n) + BigInt(fee.amount));
+    } else {
+      loose.push(`${fee.amount} ${fee.unit}`);
+    }
+  }
+
+  return [
+    ...Array.from(totals, ([unit, amount]) => `${amount.toString()} ${unit}`),
+    ...loose,
+  ].join(" + ");
 }
 
 async function requestEvmAccount(): Promise<Address> {
@@ -219,6 +293,54 @@ async function waitForL1BridgeCredit(args: {
   throw new Error("Timed out waiting for Snowbridge funds to arrive on L1.");
 }
 
+async function readAssetHubBridgeBalance(args: {
+  env: Env;
+  bridgeEnv?: SnowbridgeBridgeEnv;
+  tokenKey: string;
+  account: string;
+}): Promise<bigint> {
+  const tokenAddress = tokenAddressFromKey(args.tokenKey, true);
+  if (!tokenAddress) throw new Error("Invalid Snowbridge token for Asset Hub balance check.");
+
+  const config = getSnowbridgeConfig(args.env, args.bridgeEnv);
+  const balances = await fetchNonZeroBalances({
+    env: args.env,
+    chain: config.destinationChain,
+    walletAddress: args.account,
+  });
+
+  const target = tokenAddress.toLowerCase();
+  return balances.find((balance) => balance.address?.toLowerCase() === target)?.rawAmount ?? 0n;
+}
+
+async function waitForAssetHubBridgeCredit(args: {
+  env: Env;
+  bridgeEnv?: SnowbridgeBridgeEnv;
+  tokenKey: string;
+  account: string;
+  baseline: bigint;
+  amountRaw: string;
+  onPoll?: (detail: string) => void;
+}) {
+  const expected = args.baseline + BigInt(args.amountRaw);
+  const deadline = Date.now() + 90 * 60 * 1000;
+
+  while (Date.now() < deadline) {
+    const balance = await readAssetHubBridgeBalance({
+      env: args.env,
+      bridgeEnv: args.bridgeEnv,
+      tokenKey: args.tokenKey,
+      account: args.account,
+    });
+
+    if (balance >= expected) return balance;
+    args.onPoll?.(`waiting for Asset Hub balance ${balance.toString()} / ${expected.toString()}`);
+    await new Promise((resolve) => window.setTimeout(resolve, 30 * 1000));
+  }
+
+  throw new Error("Timed out waiting for Snowbridge funds to arrive on Asset Hub.");
+}
+
 export default function TransferPage() {
   const [network, setNetwork] = useState<Network>("testnet");
 
@@ -246,6 +368,7 @@ export default function TransferPage() {
   const copiedTimerRef = useRef<number | null>(null);
 
   const [progress, setProgress] = useState<SubmitProgress>(emptyProgress());
+  const [metrics, setMetrics] = useState<TransferMetrics | null>(null);
 
   const chainOptions: ComboOption<number>[] = useMemo(
     () =>
@@ -362,6 +485,7 @@ export default function TransferPage() {
       setPlan(null);
       setExec({});
       setProgress(emptyProgress());
+      setMetrics(null);
 
       try {
         const list = await getAcrossChains(network);
@@ -400,6 +524,7 @@ export default function TransferPage() {
       setPlan(null);
       setExec({});
       setProgress(emptyProgress());
+      setMetrics(null);
 
       if (sourceChainId == null) return;
 
@@ -439,6 +564,7 @@ export default function TransferPage() {
       setPlan(null);
       setExec({});
       setProgress(emptyProgress());
+      setMetrics(null);
 
       if (sourceChainId == null) return;
       if (!tokenKey) return;
@@ -508,6 +634,7 @@ export default function TransferPage() {
     setError(null);
     setExec({});
     setProgress(emptyProgress());
+    setMetrics(null);
 
     if (sourceChainId == null || destinationChainId == null || !tokenKey) return;
 
@@ -542,6 +669,7 @@ export default function TransferPage() {
     setExecLoading(true);
     setExec({});
     setError(null);
+    setMetrics(null);
     setProgress({
       started: true,
       lines: buildProgressLines(plan, network),
@@ -551,6 +679,24 @@ export default function TransferPage() {
     let snowbridgeAmountRawFromAcross: string | undefined;
     let activeProgressLineId: string | null = null;
     let requiredAcrossAccount: Address | undefined;
+    let sourceConfirmationMs = 0;
+    let destinationReceivedAt: number | null = null;
+    let metricNote: string | undefined;
+    const transferStartedAt = performance.now();
+    const fees: MetricFee[] = [];
+
+    const finishMetrics = (success: boolean) => {
+      setMetrics({
+        endToEndMs: Math.round(performance.now() - transferStartedAt),
+        sourceConfirmationMs: sourceConfirmationMs > 0 ? sourceConfirmationMs : null,
+        destinationReceivedMs:
+          destinationReceivedAt !== null ? Math.round(destinationReceivedAt - transferStartedAt) : null,
+        successRate: success ? "1/1 (100%)" : "0/1 (0%)",
+        totalFee: totalFeeText(fees),
+        fees: [...fees],
+        note: metricNote,
+      });
+    };
 
     try {
       const needsAcross = plan.steps.some((step) => step.kind === "across");
@@ -586,6 +732,15 @@ export default function TransferPage() {
             tokens,
             expectedAccount: requiredAcrossAccount,
           });
+          sourceConfirmationMs += res.sourceConfirmationMs ?? 0;
+          addFee(fees, "Across approval gas", res.approvalGasFeeWei, "wei");
+          addFee(fees, "Across swap gas", res.swapGasFeeWei, "wei");
+          addFee(
+            fees,
+            "Across relay fee",
+            positiveRawDiff(res.inputAmountRaw, res.expectedOutputAmount),
+            `raw ${selectedToken?.symbol ?? "token"}`
+          );
 
           if (needsApproval) {
             updateProgressLine(approvalLineId, {
@@ -630,6 +785,10 @@ export default function TransferPage() {
               detail: fillStatusText,
             });
 
+            if (i === plan.steps.length - 1) {
+              destinationReceivedAt = performance.now();
+            }
+
             snowbridgeAmountRawFromAcross = res.minOutputAmount ?? res.expectedOutputAmount;
             if (!snowbridgeAmountRawFromAcross || snowbridgeAmountRawFromAcross === "0") {
               throw new Error("Across quote did not return destination output amount for Snowbridge step.");
@@ -643,19 +802,25 @@ export default function TransferPage() {
         const snowbridgeApproveLineId = `snowbridge-${i}-approve`;
         const snowbridgeLineId = `snowbridge-${i}-bridge`;
         const snowbridgeWaitLineId = `snowbridge-${i}-wait-l1`;
+        const snowbridgeDestinationLineId = `snowbridge-${i}-wait-destination`;
         activeProgressLineId = snowbridgePrepareLineId;
 
         if (step.kind === "snowbridgeReverse") {
           const l1Recipient =
             step.recipientMode === "depositor" ? await requestEvmAccount() : (recipient.trim() as Address);
-          const l1BalanceBefore =
-            step.recipientMode === "depositor"
-              ? await readL1TokenBalance({
-                  chainId: step.destinationChainId,
-                  tokenKey: step.tokenKey,
-                  account: l1Recipient,
-                })
-              : undefined;
+          let l1BalanceBefore: bigint | undefined;
+          let l1WatchError: string | undefined;
+
+          try {
+            l1BalanceBefore = await readL1TokenBalance({
+              chainId: step.destinationChainId,
+              tokenKey: step.tokenKey,
+              account: l1Recipient,
+            });
+          } catch (e: any) {
+            if (step.recipientMode === "depositor") throw e;
+            l1WatchError = e?.message ?? "L1 balance watcher unavailable.";
+          }
 
           const res = await executeSnowbridgeFromAssetHub({
             env: network,
@@ -675,6 +840,8 @@ export default function TransferPage() {
               });
             },
           });
+          sourceConfirmationMs += res.sourceConfirmationMs ?? 0;
+          addFee(fees, "Snowbridge delivery", res.deliveryFeeDot, "DOT");
 
           const ok = res.status === "success";
           updateProgressLine(snowbridgeLineId, {
@@ -691,6 +858,9 @@ export default function TransferPage() {
 
           if (step.recipientMode === "depositor") {
             requiredAcrossAccount = l1Recipient;
+          }
+
+          if (l1BalanceBefore !== undefined) {
             activeProgressLineId = snowbridgeWaitLineId;
             updateProgressLine(snowbridgeWaitLineId, {
               status: "running",
@@ -701,7 +871,7 @@ export default function TransferPage() {
               chainId: step.destinationChainId,
               tokenKey: step.tokenKey,
               account: l1Recipient,
-              baseline: l1BalanceBefore ?? 0n,
+              baseline: l1BalanceBefore,
               amountRaw: res.amountRaw,
               onPoll: (detail) => updateProgressLine(snowbridgeWaitLineId, { detail }),
             });
@@ -709,6 +879,17 @@ export default function TransferPage() {
             updateProgressLine(snowbridgeWaitLineId, {
               status: "success",
               detail: `${res.bridgeAssetSymbol} arrived on L1.`,
+            });
+
+            if (i === plan.steps.length - 1) {
+              destinationReceivedAt = performance.now();
+            }
+          } else {
+            const note = l1WatchError ? `destination_received_time not tracked: ${l1WatchError}` : undefined;
+            metricNote = note ?? metricNote;
+            updateProgressLine(snowbridgeWaitLineId, {
+              status: "success",
+              detail: note,
             });
           }
 
@@ -720,6 +901,19 @@ export default function TransferPage() {
 
         if (step.amountSource === "acrossMinOutput" && !amountRaw) {
           throw new Error("Missing Across output amount for Snowbridge step.");
+        }
+
+        let assetHubBalanceBefore: bigint | undefined;
+        let assetHubWatchError: string | undefined;
+        try {
+          assetHubBalanceBefore = await readAssetHubBridgeBalance({
+            env: network,
+            bridgeEnv: step.bridgeEnv,
+            tokenKey: step.tokenKey,
+            account: recipient.trim(),
+          });
+        } catch (e: any) {
+          assetHubWatchError = e?.message ?? "Asset Hub balance watcher unavailable.";
         }
 
         const res = await executeSnowbridgeToAssetHub({
@@ -746,6 +940,10 @@ export default function TransferPage() {
             });
           },
         });
+        sourceConfirmationMs += res.sourceConfirmationMs ?? 0;
+        addFee(fees, "Snowbridge approval gas", res.approvalGasFeeWei, "wei");
+        addFee(fees, "Snowbridge bridge gas", res.bridgeGasFeeWei, "wei");
+        addFee(fees, "Snowbridge delivery", res.deliveryFeeWei, "wei");
 
         const ok = res.status === "success";
         updateProgressLine(snowbridgeLineId, {
@@ -759,11 +957,49 @@ export default function TransferPage() {
         }
 
         setExec({ hash: res.txHash, status: res.status });
+
+        if (assetHubBalanceBefore !== undefined) {
+          activeProgressLineId = snowbridgeDestinationLineId;
+          updateProgressLine(snowbridgeDestinationLineId, {
+            status: "running",
+            detail: `Waiting for ${res.bridgeAssetSymbol} on Asset Hub.`,
+          });
+
+          await waitForAssetHubBridgeCredit({
+            env: network,
+            bridgeEnv: step.bridgeEnv,
+            tokenKey: step.tokenKey,
+            account: recipient.trim(),
+            baseline: assetHubBalanceBefore,
+            amountRaw: res.amountRaw,
+            onPoll: (detail) => updateProgressLine(snowbridgeDestinationLineId, { detail }),
+          });
+
+          updateProgressLine(snowbridgeDestinationLineId, {
+            status: "success",
+            detail: `${res.bridgeAssetSymbol} arrived on Asset Hub.`,
+          });
+
+          if (i === plan.steps.length - 1) {
+            destinationReceivedAt = performance.now();
+          }
+        } else {
+          const note = assetHubWatchError
+            ? `destination_received_time not tracked: ${assetHubWatchError}`
+            : undefined;
+          metricNote = note ?? metricNote;
+          updateProgressLine(snowbridgeDestinationLineId, {
+            status: "success",
+            detail: note,
+          });
+        }
       }
 
+      finishMetrics(true);
       setProgress((prev) => ({ ...prev, done: true }));
     } catch (e: any) {
       const msg = e?.message ?? "Execution failed";
+      finishMetrics(false);
       setExec({ err: msg });
       setError(msg);
       setProgress((prev) => ({
@@ -1020,6 +1256,42 @@ export default function TransferPage() {
               ) : null}
               {exec.status ? <div className="muted">Status: {exec.status}</div> : null}
             </div>
+
+            {metrics ? (
+              <div className="metricsBlock">
+                <div className="previewTitle">Metrics</div>
+                <div className="metricRow">
+                  <span>end_to_end_time</span>
+                  <strong>{formatDuration(metrics.endToEndMs)}</strong>
+                </div>
+                <div className="metricRow">
+                  <span>source_confirmation_time</span>
+                  <strong>{formatDuration(metrics.sourceConfirmationMs)}</strong>
+                </div>
+                <div className="metricRow">
+                  <span>destination_received_time</span>
+                  <strong>{formatDuration(metrics.destinationReceivedMs)}</strong>
+                </div>
+                <div className="metricRow">
+                  <span>success_rate</span>
+                  <strong>{metrics.successRate}</strong>
+                </div>
+                <div className="metricRow">
+                  <span>total_fee</span>
+                  <strong>{metrics.totalFee}</strong>
+                </div>
+                {metrics.fees.length > 0 ? (
+                  <div className="metricBreakdown">
+                    {metrics.fees.map((fee, index) => (
+                      <div key={`${fee.label}-${fee.unit}-${index}`} className="muted">
+                        {fee.label}: {fee.amount} {fee.unit}
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+                {metrics.note ? <div className="muted metricNote">{metrics.note}</div> : null}
+              </div>
+            ) : null}
           </div>
         )}
 

@@ -237,6 +237,11 @@ function applyFeeOverrides(request: any, feeOverrides: FeeOverrides) {
   }
 }
 
+function receiptFeeWei(receipt: { gasUsed?: bigint; effectiveGasPrice?: bigint }): string | undefined {
+  if (receipt.gasUsed === undefined || receipt.effectiveGasPrice === undefined) return undefined;
+  return (receipt.gasUsed * receipt.effectiveGasPrice).toString();
+}
+
 async function sendPreparedTransaction(args: {
   walletClient: any;
   publicClient: any;
@@ -255,9 +260,11 @@ async function sendPreparedTransaction(args: {
   applyFeeOverrides(txReq, feeOverrides);
 
   const hash = await args.walletClient.sendTransaction(txReq);
+  const sourceConfirmationStartedAt = performance.now();
   const receipt = await args.publicClient.waitForTransactionReceipt({ hash });
+  const sourceConfirmationMs = Math.round(performance.now() - sourceConfirmationStartedAt);
 
-  return { hash, receipt };
+  return { hash, receipt, sourceConfirmationMs, gasFeeWei: receiptFeeWei(receipt) };
 }
 
 export async function executeSnowbridgeToAssetHub(args: {
@@ -359,6 +366,7 @@ export async function executeSnowbridgeToAssetHub(args: {
     });
 
     let approvalTxHash: Hex | undefined;
+    let approvalGasFeeWei: string | undefined;
     if (!bridgeAsset.isNative) {
       const gatewayAddress = txAddress(registry.gatewayAddress);
       const allowance = (await publicClient.readContract({
@@ -385,7 +393,7 @@ export async function executeSnowbridgeToAssetHub(args: {
           value: 0n,
         } as TransactionRequest;
 
-        const { hash, receipt } = await sendPreparedTransaction({
+        const { hash, receipt, gasFeeWei } = await sendPreparedTransaction({
           walletClient,
           publicClient,
           account,
@@ -393,6 +401,7 @@ export async function executeSnowbridgeToAssetHub(args: {
         });
 
         approvalTxHash = hash;
+        approvalGasFeeWei = gasFeeWei;
         if (receipt.status !== "success") {
           throw new Error(`${bridgeAsset.symbol} approval transaction reverted.`);
         }
@@ -450,7 +459,7 @@ export async function executeSnowbridgeToAssetHub(args: {
       detail: `Submitting Snowbridge transfer with ${bridgeAsset.symbol}...`,
     });
 
-    const { hash, receipt } = await sendPreparedTransaction({
+    const { hash, receipt, sourceConfirmationMs, gasFeeWei } = await sendPreparedTransaction({
       walletClient,
       publicClient,
       account,
@@ -463,10 +472,13 @@ export async function executeSnowbridgeToAssetHub(args: {
       amountRaw,
       deliveryFeeWei: fee.totalFeeInWei.toString(),
       executionFeeWei: (validation.data.feeInfo?.executionFee ?? 0n).toString(),
+      sourceConfirmationMs,
+      bridgeGasFeeWei: gasFeeWei,
       destinationName: config.destinationName,
       bridgeAssetAddress: bridgeAsset.address,
       bridgeAssetSymbol: bridgeAsset.symbol,
       approvalTxHash,
+      approvalGasFeeWei,
     };
   } finally {
     await context.destroyContext();

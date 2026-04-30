@@ -55,6 +55,11 @@ function txValue(value: unknown, fallback = 0n): bigint {
   return optPositiveBigInt(value) ?? fallback;
 }
 
+function receiptFeeWei(receipt: { gasUsed?: bigint; effectiveGasPrice?: bigint }): string | undefined {
+  if (receipt.gasUsed === undefined || receipt.effectiveGasPrice === undefined) return undefined;
+  return (receipt.gasUsed * receipt.effectiveGasPrice).toString();
+}
+
 const NATIVE_TOKEN_ADDRESS = "0x0000000000000000000000000000000000000000";
 
 export async function executeAcrossViaSwapApi(args: {
@@ -127,6 +132,7 @@ export async function executeAcrossViaSwapApi(args: {
   }
 
   let approvalHash: Hex | null = null;
+  let approvalGasFeeWei: string | undefined;
   if (approvalTx?.to && approvalTx?.data) {
     const approvalFeeOverrides = await getSafeFeeOverrides(publicClient);
     const approvalReq: any = {
@@ -141,7 +147,8 @@ export async function executeAcrossViaSwapApi(args: {
 
     approvalHash = await walletClient.sendTransaction(approvalReq);
 
-    await publicClient.waitForTransactionReceipt({ hash: approvalHash });
+    const approvalReceipt = await publicClient.waitForTransactionReceipt({ hash: approvalHash });
+    approvalGasFeeWei = receiptFeeWei(approvalReceipt);
   }
 
   const swapFeeOverrides = await getSafeFeeOverrides(publicClient);
@@ -157,14 +164,20 @@ export async function executeAcrossViaSwapApi(args: {
 
   const swapHash = await walletClient.sendTransaction(swapReq);
 
+  const sourceConfirmationStartedAt = performance.now();
   const receipt = await publicClient.waitForTransactionReceipt({ hash: swapHash });
+  const sourceConfirmationMs = Math.round(performance.now() - sourceConfirmationStartedAt);
 
   return {
     account: account as Address,
     approvalTxSent: !!approvalTx,
     approvalTxHash: approvalHash,
+    approvalGasFeeWei,
+    inputAmountRaw: amountRaw,
     swapTxHash: swapHash,
     swapReceiptStatus: receipt.status, // "success" | "reverted"
+    sourceConfirmationMs,
+    swapGasFeeWei: receiptFeeWei(receipt),
     expectedOutputAmount: resp.expectedOutputAmount,
     minOutputAmount: resp.minOutputAmount,
     expectedFillTimeSec: resp.expectedFillTime,
