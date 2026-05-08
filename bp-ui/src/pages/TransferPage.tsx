@@ -47,6 +47,10 @@ function isSubstrateRecipient(v: string): boolean {
   }
 }
 
+function destinationNeedsSubstrateRecipient(chainId: number | null): boolean {
+  return chainId != null && isSnowbridgeDestination(chainId);
+}
+
 type StepStatus = "idle" | "running" | "success" | "error";
 
 type ProgressLine = {
@@ -285,7 +289,7 @@ export default function TransferPage() {
   const snowbridgeConfigs = useMemo(() => getSnowbridgeConfigs(network), [network]);
 
   const recipientIsSubstrate = useMemo(
-    () => destinationChainId != null && isSnowbridgeDestination(destinationChainId),
+    () => destinationNeedsSubstrateRecipient(destinationChainId),
     [destinationChainId]
   );
 
@@ -502,6 +506,16 @@ export default function TransferPage() {
       ...prev,
       lines: prev.lines.map((line) => (line.id === id ? { ...line, ...patch } : line)),
     }));
+  }
+
+  function onDestinationChange(nextChainId: number | null) {
+    const currentRecipientType = destinationNeedsSubstrateRecipient(destinationChainId);
+    const nextRecipientType = destinationNeedsSubstrateRecipient(nextChainId);
+
+    setDestinationChainId(nextChainId);
+    if (destinationChainId != null && currentRecipientType !== nextRecipientType) {
+      setRecipient("");
+    }
   }
 
   async function onSubmitPreview() {
@@ -860,7 +874,7 @@ export default function TransferPage() {
                 : "Type or pick destination chain..."
           }
           value={destinationChainId}
-          onChange={(v) => setDestinationChainId(v)}
+          onChange={onDestinationChange}
           options={destinationOptions}
           loading={loadingDestinations}
           disabled={sourceChainId == null || !tokenKey || loadingDestinations || execLoading}
